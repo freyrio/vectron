@@ -1,0 +1,47 @@
+[package]
+name = "vectron_gpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Common dependencies for all GPU backends
+thiserror = "1.0"
+bitflags = "2.4"
+log = "0.4"
+bytemuck = { version = "1.14", features = ["derive"] }
+uuid = { version = "1.6", features = ["v4"] }
+
+# Windows-specific dependencies for DirectX
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61.1", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Direct3D_Fxc",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+]}
+
+# Optional dependencies for Vulkan backend
+# [dependencies.vulkan]
+# version = "x.y"
+# optional = true
+
+# Example common dependencies (uncomment as needed)
+# log = "0.4"
+
+[features]
+default = ["dx12"]
+dx12 = [] # DirectX 12 backend
+vulkan = [] # Vulkan backend (to be implemented)
+metal = [] # Metal backend (to be implemented)
+software = [] # Software rendering backend (to be implemented)
+
+[dev-dependencies]
+vectron_embedder = { path = "../vectron_embedder" }
+
+[[example]]
+name = "triangle_window"
+path = "examples/triangle_window.rs"

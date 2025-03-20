@@ -1,0 +1,47 @@
+[package]
+name = "vectron_embedder"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Cross-platform window and view embedder for Vectron"
+license.workspace = true
+
+[dependencies]
+# Platform-specific dependencies will be conditionally included
+# based on the target operating system
+
+# Windows-specific dependencies
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation", 
+    "Win32_UI_WindowsAndMessaging", 
+    "Win32_Graphics_Gdi", 
+    "Win32_System_LibraryLoader",
+    "Win32_UI_HiDpi", 
+    "Win32_System_Memory",
+    "Win32_System_SystemServices",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_UI_Controls",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_Graphics_Dwm"
+]}
+raw-window-handle = "0.5"
+
+# Example common dependencies (uncomment as needed)
+# log = "0.4"
+
+[features]
+default = []
+# Feature flags can be defined here
+
+[[example]]
+name = "basic_window"
+path = "examples/basic_window.rs"
+
+[[example]]
+name = "multiple_windows"
+path = "examples/multiple_windows.rs"

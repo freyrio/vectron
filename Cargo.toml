@@ -1,0 +1,16 @@
+[workspace]
+members = [
+    "vectron_embedder",
+    "vectron_gpu",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Vectron Team"]
+description = "Vectron: A cross-platform embedder and GPU abstraction layer"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# Common dependencies can be defined here and referenced in member crates 
