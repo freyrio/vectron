@@ -6,11 +6,11 @@ pub enum GpuError {
     #[error("Backend initialization failed: {0}")]
     InitializationFailed(String),
     
-    #[error("Invalid handle or resource ID: {0}")]
+    #[error("Invalid handle: {0}")]
     InvalidHandle(String),
     
-    #[error("Invalid resource")]
-    InvalidResource,
+    #[error("Invalid resource: {0}")]
+    InvalidResource(String),
     
     #[error("Invalid buffer: {0}")]
     InvalidBuffer(String),
@@ -36,12 +36,57 @@ pub enum GpuError {
     #[error("Unimplemented feature: {0}")]
     Unimplemented(String),
     
-    #[error("Backend-specific error: {0}")]
-    BackendError(String),
-    
     #[error("Out of memory")]
     OutOfMemory,
     
-    #[error("Device lost")]
-    DeviceLost,
-} 
+    #[error("Device lost: {0}")]
+    DeviceLost(String),
+    
+    #[error("Buffer update failed (size: {size}, offset: {offset}): {reason}")]
+    BufferUpdateFailed {
+        size: usize,
+        offset: usize,
+        reason: String,
+    },
+    
+    #[error("Pipeline creation failed: {reason}")]
+    PipelineCreationFailed {
+        reason: String,
+        shader_errors: Option<Vec<String>>,
+    },
+    
+    // Backend error with code formatting
+    #[error("Backend error [{backend}]: {message}{}", format_code(.code))]
+    BackendError {
+        backend: String,
+        message: String,
+        code: Option<i32>,
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
+}
+
+impl GpuError {
+    // Helper method to create a backend error with formatted code
+    pub fn backend_error<S: Into<String>>(
+        backend: S, 
+        message: S, 
+        code: Option<i32>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>
+    ) -> Self {
+        GpuError::BackendError {
+            backend: backend.into(),
+            message: message.into(),
+            code,
+            source,
+        }
+    }
+}
+
+// Helper function for thiserror to format the code
+fn format_code(code: &Option<i32>) -> String {
+    match code {
+        Some(code) => format!(" (code: 0x{:X})", code),
+        None => String::new(),
+    }
+}
