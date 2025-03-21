@@ -17,7 +17,7 @@ Vectron GPU is the graphics abstraction layer for the Vectron engine, designed t
 1. **API Layer**: Public-facing interface with tiered abstraction levels
 2. **Registry Layer**: Resource management and tracking
 3. **Backend Layer**: Backend-specific implementations
-4. **Utility Layer**: Cross-cutting concerns like debugging, profiling
+4. **Utility Layer**: Cross-cutting concerns like debugging, profiling, and error handling
 
 ## 2. API Layer
 
@@ -284,6 +284,8 @@ vectron_gpu/src/backends/directx/
 ├── mod.rs                 # Public exports
 ├── dx12.rs                # Main backend struct and trait implementation
 ├── device.rs              # Device creation and management
+├── debug.rs               # DirectX-specific debug features
+├── error.rs               # Backend-specific error extensions
 ├── resources/             # Resource management
 │   ├── mod.rs
 │   ├── buffer.rs          # Buffer implementation
@@ -327,11 +329,214 @@ impl GpuBackend for DirectX12Backend {
 }
 ```
 
-## 5. Shader System
+## 5. Error System
+
+The error system provides robust error handling with cross-cutting utilities and backend-specific extensions.
+
+### 5.1 Core Error Types
+
+```rust
+// In src/common/error.rs
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum GpuError {
+    #[error("Backend initialization failed: {0}")]
+    InitializationFailed(String),
+    
+    #[error("Invalid handle: {0}")]
+    InvalidHandle(String),
+    
+    #[error("Invalid resource: {0}")]
+    InvalidResource(String),
+    
+    #[error("Invalid buffer: {0}")]
+    InvalidBuffer(String),
+    
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
+    
+    #[error("Resource creation failed: {0}")]
+    ResourceCreationFailed(String),
+    
+    #[error("Invalid operation: {0}")]
+    InvalidOperation(String),
+    
+    #[error("Shader compilation failed: {0}")]
+    ShaderCompilationFailed(String),
+    
+    #[error("Surface error: {0}")]
+    SurfaceError(String),
+    
+    #[error("Unsupported feature: {0}")]
+    UnsupportedFeature(String),
+    
+    #[error("Unimplemented feature: {0}")]
+    Unimplemented(String),
+    
+    #[error("Out of memory")]
+    OutOfMemory,
+    
+    #[error("Device lost: {0}")]
+    DeviceLost(String),
+    
+    #[error("Buffer update failed (size: {size}, offset: {offset}): {reason}")]
+    BufferUpdateFailed {
+        size: usize,
+        offset: usize,
+        reason: String,
+    },
+    
+    #[error("Pipeline creation failed: {reason}")]
+    PipelineCreationFailed {
+        reason: String,
+        shader_errors: Option<Vec<String>>,
+    },
+    
+    // Backend error with code formatting
+    #[error("Backend error [{backend}]: {message}{}", format_code(.code))]
+    BackendError {
+        backend: String,
+        message: String,
+        code: Option<i32>,
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
+}
+
+impl GpuError {
+    // Helper method to create a backend error with formatted code
+    pub fn backend_error<S: Into<String>>(
+        backend: S, 
+        message: S, 
+        code: Option<i32>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>
+    ) -> Self {
+        GpuError::BackendError {
+            backend: backend.into(),
+            message: message.into(),
+            code,
+            source,
+        }
+    }
+}
+
+// Helper function for thiserror to format the code
+fn format_code(code: &Option<i32>) -> String {
+    match code {
+        Some(code) => format!(" (code: 0x{:X})", code),
+        None => String::new(),
+    }
+}
+```
+
+### 5.2 Error Context
+
+```rust
+// In src/common/error_context.rs
+use super::GpuError;
+
+pub struct ErrorContext {
+    pub function: &'static str,
+    pub file: &'static str,
+    pub line: u32,
+}
+
+impl ErrorContext {
+    pub fn current() -> Self {
+        Self {
+            function: "",
+            file: file!(),
+            line: line!(),
+        }
+    }
+    
+    pub fn log(&self, error: &GpuError) {
+        log::error!("{} at {}:{}: {}", 
+                  self.function, self.file, self.line, error);
+    }
+}
+
+// Utility macro for error propagation with context
+#[macro_export]
+macro_rules! gpu_try {
+    ($expr:expr) => {
+        match $expr {
+            Ok(val) => val,
+            Err(e) => {
+                let ctx = $crate::common::ErrorContext::current();
+                ctx.log(&e);
+                return Err(e);
+            }
+        }
+    };
+    ($expr:expr, $context:expr) => {
+        match $expr {
+            Ok(val) => val,
+            Err(e) => {
+                log::error!("{} at {}:{}: {}", 
+                          $context, file!(), line!(), e);
+                return Err(e);
+            }
+        }
+    };
+}
+```
+
+### 5.3 Backend-Specific Error Extensions
+
+```rust
+// In src/backends/directx/error.rs
+use crate::common::GpuError;
+use windows::core::Error as WindowsError;
+
+pub trait DirectXErrorExt {
+    fn to_gpu_error(self, context: &str) -> GpuError;
+}
+
+impl DirectXErrorExt for WindowsError {
+    fn to_gpu_error(self, context: &str) -> GpuError {
+        let code = self.code().0;
+        
+        // Map specific DirectX error codes to appropriate GpuError variants
+        match code {
+            // Device removed/reset (0x887A0005)
+            0x887A0005 => GpuError::DeviceLost(format!("{}: {}", context, self)),
+            
+            // Out of memory (0x8007000E)
+            0x8007000E => GpuError::OutOfMemory,
+            
+            // Invalid arguments (0x80070057)
+            0x80070057 => GpuError::InvalidArgument(format!("{}: {}", context, self)),
+            
+            // General backend error for other codes
+            _ => GpuError::backend_error(
+                "DirectX12", 
+                format!("{}: {}", context, self),
+                Some(code as i32),
+                Some(Box::new(self))
+            ),
+        }
+    }
+}
+
+// Usage example
+fn create_device_impl(&self, desc: &DeviceDesc) -> Result<DirectX12Device, GpuError> {
+    let device: ID3D12Device = unsafe {
+        D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_11_0, &mut device)
+            .map_err(|e| e.to_gpu_error("Failed to create D3D12 device"))?
+    };
+    
+    // Rest of implementation...
+    Ok(device)
+}
+```
+
+## 6. Shader System
 
 The shader system handles compilation, reflection, and variant generation.
 
-### 5.1 Build-time Shader Compilation
+### 6.1 Build-time Shader Compilation
 
 ```rust
 // build.rs
@@ -348,7 +553,7 @@ fn main() {
 }
 ```
 
-### 5.2 Generated Shader Modules
+### 6.2 Generated Shader Modules
 
 ```rust
 // Generated from build process
@@ -383,7 +588,7 @@ pub mod shaders {
 }
 ```
 
-### 5.3 Shader Variants
+### 6.3 Shader Variants
 
 ```rust
 // Variant generation
@@ -409,11 +614,168 @@ let shadow_variant = shaders::BASIC_VERTEX.variant()
     .build(&device)?;
 ```
 
-## 6. Pipeline State Objects
+## 7. Debug System
+
+The debug system provides both backend-specific debugging and cross-cutting utilities.
+
+### 7.1 Cross-Cutting Debug Utilities
+
+```rust
+// In src/debug/mod.rs
+mod labels;
+mod markers;
+mod capture;
+mod validation;
+mod resource_tracker;
+
+pub use labels::ResourceLabels;
+pub use markers::PerformanceMarkers;
+pub use capture::FrameCapture;
+pub use resource_tracker::ResourceTracker;
+
+// Public API consolidation
+pub struct GpuProfiler {
+    #[cfg(feature = "gpu_timers")]
+    markers: PerformanceMarkers,
+}
+
+impl GpuProfiler {
+    pub fn begin_scope(&mut self, cmd: &mut CommandBuffer, name: &str) {
+        #[cfg(feature = "gpu_timers")]
+        self.markers.begin_scope(cmd, name);
+    }
+    
+    pub fn end_scope(&mut self, cmd: &mut CommandBuffer) {
+        #[cfg(feature = "gpu_timers")]
+        self.markers.end_scope(cmd);
+    }
+    
+    // Other methods...
+}
+
+pub struct GpuLogger;
+
+impl GpuLogger {
+    pub fn set_resource_name<T: Resource>(resource: &T, name: &str) {
+        #[cfg(feature = "debug_labels")]
+        ResourceLabels::set_label(resource, name);
+    }
+    
+    // Other methods...
+}
+```
+
+### 7.2 Backend-Specific Debug Implementation
+
+```rust
+// In src/backends/directx/debug.rs
+use crate::{debug::resource_tracker::ResourceTracker, GpuError};
+use windows::Win32::Graphics::Direct3D12::*;
+use windows::core::Interface;
+
+pub struct DirectX12Debug {
+    info_queue: Option<ID3D12InfoQueue>,
+    debug_device: Option<ID3D12DebugDevice>,
+    resource_tracker: ResourceTracker<D3D12_RESOURCE_STATES>,
+}
+
+impl DirectX12Debug {
+    pub fn new(device: &ID3D12Device) -> Result<Self, GpuError> {
+        let info_queue = match device.cast::<ID3D12InfoQueue>() {
+            Ok(q) => {
+                // Configure queue
+                unsafe {
+                    // Don't break on warnings in release mode
+                    let break_severity = if cfg!(debug_assertions) {
+                        D3D12_MESSAGE_SEVERITY_WARNING
+                    } else {
+                        D3D12_MESSAGE_SEVERITY_ERROR
+                    };
+                    
+                    let _ = q.SetBreakOnSeverity(break_severity, true);
+                    let _ = q.SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
+                }
+                Some(q)
+            },
+            Err(_) => None
+        };
+        
+        let debug_device = match device.cast::<ID3D12DebugDevice>() {
+            Ok(d) => Some(d),
+            Err(_) => None,
+        };
+        
+        Ok(Self {
+            info_queue,
+            debug_device,
+            resource_tracker: ResourceTracker::new(),
+        })
+    }
+    
+    pub fn track_resource(&mut self, id: u64, name: &str, initial_state: D3D12_RESOURCE_STATES) {
+        self.resource_tracker.track(id, name.to_string(), initial_state);
+    }
+    
+    pub fn update_resource_state(&mut self, id: u64, new_state: D3D12_RESOURCE_STATES) -> Result<(), GpuError> {
+        self.resource_tracker.update_state(id, new_state)
+    }
+    
+    pub fn validate_resource_state(&self, id: u64, expected_state: D3D12_RESOURCE_STATES) -> Result<(), GpuError> {
+        // Validate that the resource is in the expected state
+        // Implementation depends on how resource_tracker is structured
+        Ok(())
+    }
+    
+    pub fn check_and_log_messages(&self) {
+        if let Some(info_queue) = &self.info_queue {
+            unsafe {
+                let count = info_queue.GetNumStoredMessages();
+                for i in 0..count {
+                    // Get the size needed for the message
+                    let mut size = 0;
+                    let _ = info_queue.GetMessage(i, None, &mut size);
+                    
+                    // Only process if we got a valid size
+                    if size > 0 {
+                        // Allocate buffer and get the message
+                        let mut buffer = vec![0u8; size as usize];
+                        let message_ptr = buffer.as_mut_ptr() as *mut _;
+                        
+                        if let Ok(_) = info_queue.GetMessage(i, Some(message_ptr), &mut size) {
+                            // Process message here
+                            log::debug!("DirectX12 Debug: Message {}", i);
+                        }
+                        
+                    }
+                    
+                    // Parse message and log according to severity
+                    // Simplified for brevity
+                }
+                
+                // Clear messages after logging
+                info_queue.ClearStoredMessages();
+            }
+        }
+    }
+    
+    pub fn report_live_objects(&self) {
+        if let Some(debug_device) = &self.debug_device {
+            log::info!("Reporting live DirectX 12 objects...");
+            unsafe {
+                let _ = debug_device.ReportLiveDeviceObjects(D3D12_RLDO_DETAIL);
+            }
+        }
+    }
+    
+    // More DirectX-specific debugging utilities
+}
+```
+
+## 8. Pipeline State Objects
 
 Pipeline state objects define the complete graphics or compute pipeline configuration.
 
-### 6.1 Pipeline State Descriptors
+### 8.1 Pipeline State Descriptors
 
 ```rust
 // Pipeline descriptor
@@ -445,7 +807,7 @@ impl PipelineDesc {
 }
 ```
 
-### 6.2 Pipeline Caching
+### 8.2 Pipeline Caching
 
 ```rust
 // Pipeline cache mechanism
@@ -483,7 +845,7 @@ impl PipelineCache {
 }
 ```
 
-### 6.3 Asynchronous Pipeline Creation
+### 8.3 Asynchronous Pipeline Creation
 
 ```rust
 // Async pipeline creation
@@ -512,131 +874,11 @@ impl AsyncPipelineQueue {
 }
 ```
 
-## 7. Debugging and Profiling
-
-Debugging and profiling tools that can be optionally compiled.
-
-### 7.1 Resource Labeling
-
-```rust
-// Debug names for resources
-impl BufferDesc {
-    pub fn label(mut self, name: impl Into<String>) -> Self {
-        #[cfg(feature = "debug_labels")]
-        {
-            self.debug_name = Some(name.into());
-        }
-        self
-    }
-}
-
-// Implementation
-#[cfg(feature = "debug_labels")]
-fn set_object_name(device: &ID3D12Device, obj: impl ID3D12Object, name: &str) {
-    let wide_name: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
-    obj.SetName(PWSTR(wide_name.as_ptr() as *mut _)).ok();
-}
-
-#[cfg(not(feature = "debug_labels"))]
-fn set_object_name(_: &ID3D12Device, _: impl ID3D12Object, _: &str) {}
-```
-
-### 7.2 GPU Timers
-
-```rust
-// GPU timing system
-pub struct GpuTimer {
-    #[cfg(feature = "gpu_timers")]
-    internal: GpuTimerImpl,
-}
-
-impl GpuTimer {
-    pub fn begin_scope(&mut self, cmd: &mut CommandBuffer, name: &str) {
-        #[cfg(feature = "gpu_timers")]
-        self.internal.begin_scope(cmd, name);
-    }
-    
-    pub fn end_scope(&mut self, cmd: &mut CommandBuffer) {
-        #[cfg(feature = "gpu_timers")]
-        self.internal.end_scope(cmd);
-    }
-    
-    pub fn get_timing_results(&self) -> Vec<TimingResult> {
-        #[cfg(feature = "gpu_timers")]
-        return self.internal.get_timing_results();
-        
-        #[cfg(not(feature = "gpu_timers"))]
-        return Vec::new();
-    }
-}
-```
-
-### 7.3 Debug Capture System
-
-```rust
-// Frame capture system
-pub struct FrameCapture {
-    #[cfg(feature = "frame_capture")]
-    internal: FrameCaptureImpl,
-}
-
-impl FrameCapture {
-    pub fn begin(&mut self, device: &GpuDevice) {
-        #[cfg(feature = "frame_capture")]
-        self.internal.begin(device);
-    }
-    
-    pub fn end(&mut self) -> Option<FrameCaptureSummary> {
-        #[cfg(feature = "frame_capture")]
-        return Some(self.internal.end());
-        
-        #[cfg(not(feature = "frame_capture"))]
-        return None;
-    }
-    
-    pub fn save(&self, path: &Path) -> Result<(), GpuError> {
-        #[cfg(feature = "frame_capture")]
-        return self.internal.save(path);
-        
-        #[cfg(not(feature = "frame_capture"))]
-        return Ok(());
-    }
-}
-```
-
-### 7.4 Validation Layer
-
-```rust
-// Resource state validation
-#[cfg(feature = "validation")]
-impl CommandBuffer {
-    fn validate_draw(&self) -> Result<(), GpuError> {
-        if self.current_pipeline.is_none() {
-            return Err(GpuError::MissingPipeline);
-        }
-        
-        let pipeline = self.registry.get_pipeline(self.current_pipeline.unwrap())?;
-        
-        // Validate bound resources match pipeline expectations
-        for binding in &pipeline.reflection.bindings {
-            if !self.bound_resources.contains(binding.slot) {
-                return Err(GpuError::MissingBinding {
-                    name: binding.name.to_string(),
-                    slot: binding.slot,
-                });
-            }
-        }
-        
-        Ok(())
-    }
-}
-```
-
-## 8. Memory Management
+## 9. Memory Management
 
 Memory management strategies for efficient resource allocation.
 
-### 8.1 Memory Allocation
+### 9.1 Memory Allocation
 
 ```rust
 // Memory allocation strategy
@@ -671,7 +913,7 @@ impl HeapAllocator {
 }
 ```
 
-### 8.2 Resource Pooling
+### 9.2 Resource Pooling
 
 ```rust
 // Resource pool for frequently created/destroyed resources
@@ -714,7 +956,7 @@ impl<T: PoolableResource> ResourcePool<T> {
 }
 ```
 
-### 8.3 Deferred Destruction
+### 9.3 Deferred Destruction
 
 ```rust
 // Deferred resource destruction
@@ -740,11 +982,11 @@ impl DeferredDestructionQueue {
 }
 ```
 
-## 9. Concurrency Model
+## 10. Concurrency Model
 
 Approach to multi-threaded command generation and execution.
 
-### 9.1 Thread-Safe Resource Creation
+### 10.1 Thread-Safe Resource Creation
 
 ```rust
 // Thread-safe device with interior mutability
@@ -769,7 +1011,7 @@ impl GpuDevice {
 }
 ```
 
-### 9.2 Parallel Command Recording
+### 10.2 Parallel Command Recording
 
 ```rust
 // Thread-local command buffer recording
@@ -811,7 +1053,7 @@ let token2 = cmd2.join().unwrap();
 device.execute(&[token1, token2]);
 ```
 
-### 9.3 Work Stealing
+### 10.3 Work Stealing
 
 ```rust
 // Work stealing for command generation
@@ -842,11 +1084,11 @@ impl WorkStealingCommandRecorder {
 }
 ```
 
-## 10. Feature Flags and Compilation
+## 11. Feature Flags and Compilation
 
 Control over which components are compiled into the binary.
 
-### 10.1 Cargo Features
+### 11.1 Cargo Features
 
 ```toml
 # In Cargo.toml
@@ -872,7 +1114,7 @@ ref_counting = []
 persistent_cache = []
 ```
 
-### 10.2 Conditional Compilation
+### 11.2 Conditional Compilation
 
 ```rust
 // Conditional backend instantiation
@@ -907,7 +1149,7 @@ pub fn create_device(desc: &DeviceDesc) -> Result<Arc<GpuDevice>, GpuError> {
 }
 ```
 
-### 10.3 Binary Size Optimizations
+### 11.3 Binary Size Optimizations
 
 ```rust
 // Optimize for size with small_binary feature
@@ -935,17 +1177,74 @@ fn format_error(code: ErrorCode) -> String {
 }
 ```
 
-## 11. Summary
+## 12. Summary and Project Structure
 
-The Vectron GPU architecture provides:
+The Vectron GPU architecture provides a comprehensive foundation for graphics programming with a focus on flexibility, performance, and developer experience.
 
-1. **Tiered API**: Low-level, standard, and high-level abstractions
-2. **Modular Backend**: Split by functionality with extension traits
-3. **Offline Work**: Build-time shader compilation and reflection
-4. **Resource Management**: Efficient tracking and validation
-5. **Pipeline Optimization**: Caching and async creation
-6. **Debugging**: Optional instrumentation and validation
+### 12.1 Key Architectural Benefits
+
+1. **Tiered API**: Three abstraction levels (low, standard, high) to accommodate different development needs
+2. **Modular Backend**: Clean separation by functionality with extension traits
+3. **Error Handling**: Rich error system with cross-cutting utilities and backend-specific extensions
+4. **Debug System**: Hybrid approach with both common utilities and backend-specific implementations
+5. **Resource Management**: Efficient tracking, validation, and lifetime management
+6. **Pipeline Optimization**: Caching and asynchronous creation for better performance
 7. **Concurrency**: Thread-safe design for multi-core utilization
-8. **Small Binary**: Feature flags for minimal size
+8. **Compilation Control**: Feature flags for minimal binary size
+
+### 12.2 Project Structure
+
+```
+vectron_gpu/
+├── Cargo.toml                  # Crate configuration with features
+├── build.rs                    # Build script for shader compilation
+│
+├── src/
+│   ├── lib.rs                  # Main entry point and public API
+│   │
+│   ├── common/                 # Common types and utilities
+│   │   ├── mod.rs
+│   │   ├── error.rs            # Core error types
+│   │   ├── error_context.rs    # Error context utilities
+│   │   └── types.rs            # Common type definitions
+│   │
+│   ├── debug/                  # Cross-cutting debug utilities
+│   │   ├── mod.rs
+│   │   ├── labels.rs           # Resource naming utilities 
+│   │   ├── markers.rs          # Performance region markers
+│   │   ├── capture.rs          # Frame capture system
+│   │   └── validation.rs       # Validation utilities
+│   │
+│   ├── registry/               # Resource registration and tracking
+│   │   ├── mod.rs
+│   │   ├── pool.rs             # Resource pool implementation
+│   │   └── tracking.rs         # Resource state tracking
+│   │
+│   ├── backends/               # Backend implementations
+│   │   ├── mod.rs              # Backend factory
+│   │   │
+│   │   ├── directx/            # DirectX backend
+│   │   │   ├── mod.rs          # Public exports
+│   │   │   ├── dx12.rs         # Main implementation
+│   │   │   ├── debug.rs        # DirectX-specific debug
+│   │   │   └── error.rs        # DirectX-specific errors
+│   │   │
+│   │   ├── vulkan/             # Vulkan backend
+│   │   │   ├── mod.rs
+│   │   │   ├── vulkan.rs
+│   │   │   ├── debug.rs
+│   │   │   └── error.rs
+│   │   │
+│   │   └── ...                 # Other backends
+│   │
+│   └── shaders/                # Shader system
+│       ├── mod.rs
+│       ├── compiler.rs         # Shader compilation utilities
+│       └── reflection.rs       # Shader reflection
+│
+└── examples/                   # Example applications
+    ├── triangle.rs
+    └── compute.rs
+```
 
 This architecture balances developer experience, performance, and binary size with compile-time feature selection, allowing applications to include only what they need while maintaining a clean, consistent API.
