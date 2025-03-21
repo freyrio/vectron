@@ -321,22 +321,31 @@ This trait serves as the foundation for platform-specific implementations. By im
 
 ### 4.2 Backend Factory
 
+The backend factory provides a centralized way to create the most appropriate backend for the current platform, with fallback mechanisms:
+
 ```rust
 // Backend factory function
 pub fn create_backend() -> Box<dyn GpuBackend> {
+    // Try to create the preferred backend first
     #[cfg(all(feature = "dx12", target_os = "windows"))]
     {
-        return Box::new(dx12::DirectX12Backend::new());
+        if let Ok(backend) = directx::try_create_backend() {
+            return Box::new(backend);
+        }
     }
     
     #[cfg(all(feature = "vulkan", any(target_os = "windows", target_os = "linux", target_os = "android")))]
     {
-        return Box::new(vulkan::VulkanBackend::new());
+        if let Ok(backend) = vulkan::try_create_backend() {
+            return Box::new(backend);
+        }
     }
     
     #[cfg(all(feature = "metal", any(target_os = "macos", target_os = "ios")))]
     {
-        return Box::new(metal::MetalBackend::new());
+        if let Ok(backend) = metal::try_create_backend() {
+            return Box::new(backend);
+        }
     }
     
     // Fallback to software rendering or panic
@@ -345,52 +354,79 @@ pub fn create_backend() -> Box<dyn GpuBackend> {
         return Box::new(software::SoftwareBackend::new());
     }
     
-    panic!("No compatible GPU backend available");
+    #[cfg(not(feature = "software"))]
+    {
+        panic!("Failed to initialize any GPU backend and no software fallback available");
+    }
 }
 ```
 
-### 4.3 Backend Implementation Structure
+This approach provides automatic selection of the appropriate backend with graceful fallback when preferred backends are unavailable.
 
-Each backend implementation is split into functional modules:
+### 4.3 Backend Module Structure
+
+Each backend implementation follows a consistent organizational structure to ensure maintainability and clarity:
 
 ```
-vectron_gpu/src/backends/directx/
-├── mod.rs                 # Public exports
-├── dx12.rs                # Main backend struct and trait implementation
-├── device.rs              # Device creation and management
-├── debug.rs               # DirectX-specific debug features
-├── error.rs               # Backend-specific error extensions
-├── resources/             # Resource management
+vectron_gpu/src/backends/
+├── mod.rs                 # Exports and backend factory function
+├── common/                # Common utilities shared across backends
 │   ├── mod.rs
-│   ├── buffer.rs          # Buffer implementation
-│   ├── texture.rs         # Texture implementation
-│   ├── shader.rs          # Shader implementation
-│   └── pipeline.rs        # Pipeline implementation
-├── commands.rs            # Command recording and execution
-├── surface.rs             # Surface/swapchain operations
-└── types.rs               # DirectX12-specific types
+│   ├── command_ext.rs     # Common command buffer extensions
+│   ├── device_ext.rs      # Common device operations
+│   ├── resource_ext.rs    # Common resource management helpers
+│   └── sync_ext.rs        # Synchronization utilities
+│
+├── directx/               # DirectX 12 backend
+│   ├── mod.rs            
+│   ├── dx12.rs            # Main backend implementation
+│   ├── device.rs          # Device management
+│   ├── commands.rs        # Command generation and submission
+│   ├── surface.rs         # Window surface management
+│   ├── sync.rs            # Synchronization primitives
+│   ├── debug.rs           # Debug and validation
+│   ├── error.rs           # DirectX-specific error handling
+│   ├── types.rs           # DirectX-specific type definitions
+│   └── resources/         # Resource implementations
+│       ├── mod.rs
+│       ├── buffer.rs      # Buffer management
+│       ├── texture.rs     # Texture management
+│       ├── shader.rs      # Shader management
+│       ├── pipeline.rs    # Pipeline state objects
 ```
 
-### 4.4 Backend Extension Traits
+This structured approach ensures that:
+- Related functionality is grouped together
+- Code is easy to navigate and maintain
+- Patterns are consistent across different backends
+- Common utilities can be shared when appropriate
 
-Extension traits for modular implementation:
+### 4.4 Extension Trait Pattern
+
+Each backend uses an extension trait pattern to maintain modularity and separation of concerns:
 
 ```rust
-// Extension trait for device operations
-mod device {
-    use super::DirectX12Backend;
-    
-    pub(super) trait DeviceExt {
-        fn create_device_impl(&self, desc: &DeviceDesc) -> Result<DirectX12Device, GpuError>;
-        // Other device-related methods...
-    }
-    
-    impl DeviceExt for DirectX12Backend {
-        fn create_device_impl(&self, desc: &DeviceDesc) -> Result<DirectX12Device, GpuError> {
-            // Implementation...
-        }
-        // Other method implementations...
-    }
+// Device extension trait
+pub(super) trait DeviceExt {
+    fn init_impl(&mut self, config: BackendConfig) -> Result<(), GpuError>;
+    fn query_capabilities(&mut self) -> Result<(), GpuError>;
+    fn wait_for_gpu(&self) -> Result<(), GpuError>;
+    fn shutdown_impl(&mut self);
+}
+
+impl DeviceExt for DirectX12Backend {
+    // Implementation...
+}
+
+// Resource extension trait
+pub(in super::super) trait BufferExt {
+    fn create_buffer_impl(&mut self, desc: BufferDescriptor) -> Result<BufferId, GpuError>;
+    fn update_buffer_impl(&mut self, id: BufferId, data: &[u8], offset: usize) -> Result<(), GpuError>;
+    fn destroy_buffer_impl(&mut self, id: BufferId);
+}
+
+impl BufferExt for DirectX12Backend {
+    // Implementation...
 }
 
 // Main implementation delegates to extension traits
@@ -402,6 +438,112 @@ impl GpuBackend for DirectX12Backend {
     // Other delegating methods...
 }
 ```
+
+This pattern provides several benefits:
+- Clear separation of concerns
+- Better code organization
+- Improved testability
+- More maintainable implementation
+- Easier to understand and navigate
+
+### 4.5 Backend Resource Management
+
+Each backend maintains its own resource tracking system to map between API-visible handles and backend-specific resources:
+
+```rust
+pub struct DirectX12Backend {
+    // Core DX12 objects
+    device: Option<ID3D12Device>,
+    command_queue: Option<ID3D12CommandQueue>,
+    
+    // Resource tracking
+    surfaces: HashMap<SurfaceId, SurfaceResources>,
+    buffers: HashMap<BufferId, BufferResources>,
+    textures: HashMap<TextureId, TextureResources>,
+    
+    // Synchronization
+    fence: Option<ID3D12Fence>,
+    fence_value: u64,
+    
+    // Debug and capabilities
+    #[cfg(feature = "validation")]
+    debug: Option<DirectX12Debug>,
+    capabilities: BackendCapabilities,
+}
+
+// Resource container
+struct BufferResources {
+    resource: ID3D12Resource,
+    size: usize,
+    state: D3D12_RESOURCE_STATES,
+    usage: BufferUsageFlags,
+    is_mapped: bool,
+    #[cfg(feature = "debug_labels")]
+    debug_name: Option<String>,
+}
+```
+
+This approach allows for:
+- Efficient mapping between handles and native resources
+- Tracking of resource state and metadata
+- Proper cleanup and memory management
+- Debug information when needed
+- Platform-specific resource handling
+
+### 4.6 Backend-Specific Error Handling
+
+Each backend implements specialized error handling to translate API-specific errors to the common error system:
+
+```rust
+// Error extension trait
+pub(super) trait DirectXErrorExt {
+    fn to_gpu_error(self, context: &str) -> GpuError;
+}
+
+impl DirectXErrorExt for WindowsError {
+    fn to_gpu_error(self, context: &str) -> GpuError {
+        let code = self.code().0;
+        
+        match code {
+            // Device removed/reset
+            0x887A0005 => GpuError::DeviceLost {
+                message: format!("{}: {}", context, self),
+                source: Some(Box::new(self)),
+            },
+            
+            // Out of memory
+            0x8007000E => GpuError::OutOfMemory {
+                message: format!("{}: {}", context, self),
+                allocated: 0,
+                requested: 0,
+                available: 0,
+                source: Some(Box::new(self)),
+            },
+            
+            // Other mappings...
+            
+            _ => GpuError::Generic {
+                message: format!("{}: {}", context, self),
+                metadata: ErrorMetadata::new(ErrorCode::Unknown, ErrorCategory::Internal),
+                location: SourceLocation {
+                    file: file!(),
+                    line: line!(),
+                    column: column!(),
+                },
+                source: Some(Box::new(self)),
+            },
+        }
+    }
+}
+```
+
+This specialized error handling provides:
+- More detailed error information
+- Consistent error reporting across backends
+- Mapping of platform-specific error codes to common error types
+- Additional context for debugging and error recovery
+
+The comprehensive backend layer provides a robust foundation for cross-platform graphics development, ensuring that the rest of the system can operate with a consistent interface regardless of the underlying graphics API.
 
 ## 5. Error System
 
