@@ -7,6 +7,14 @@
 
 1. [Overview](#1-overview)
 2. [API Layer](#2-api-layer)
+   - [Tiered API Design](#21-tiered-api-design)
+     - [Bare API](#211-bare-api)
+     - [Standard API](#212-standard-api)
+     - [Domain-Specific Rendering APIs](#213-domain-specific-rendering-apis-external)
+   - [Resource Types](#22-resource-types)
+   - [Command Generation](#23-command-generation)
+   - [Shader Interface](#24-shader-interface)
+   - [Core Interfaces Organization](#25-core-interfaces-organization)
 3. [Registry Layer](#3-registry-layer)
 4. [Backend Layer](#4-backend-layer)
 5. [Error System](#5-error-system)
@@ -43,41 +51,128 @@ The API layer defines the public interface of Vectron GPU. This is what develope
 
 ### 2.1 Tiered API Design
 
-The API is structured in three tiers, each providing a different level of abstraction and control:
+The API is structured in two primary tiers, each providing a different level of abstraction and control:
 
-1. **Low-level API**: Provides direct access to backend functionality with minimal overhead
-2. **Standard API**: The main interface that most applications will use
-3. **High-level API**: Convenience methods for common operations
+1. **Bare API**: Provides direct, low-overhead access to GPU functionality in a backend-agnostic way
+2. **Standard API**: The main interface that most applications will use, with more ergonomics and safety
+
+```
+vectron_gpu/src/api/
+├── mod.rs              # Exports from both API tiers
+├── bare/               # Bare (low-level) API module
+│   ├── mod.rs          # Exports bare API components
+│   ├── device.rs       # Direct device interface
+│   ├── resources.rs    # Raw resource handling
+│   ├── commands.rs     # Direct command building
+│   └── sync.rs         # Low-level synchronization
+│
+└── standard/           # Standard API module
+    ├── mod.rs          # Exports standard API components
+    ├── device.rs       # User-friendly device interface
+    ├── resources.rs    # Resource creation and management
+    ├── commands.rs     # Command buffer abstraction
+    ├── pipelines.rs    # Pipeline state management
+    └── sync.rs         # Synchronization primitives
+```
+
+#### 2.1.1 Bare API
+
+The Bare API provides a thin, low-overhead abstraction over the backend implementations. It's designed for maximum performance and control with minimal abstraction cost:
 
 ```rust
-// Low-level API (thin abstraction)
-pub trait GpuBackend {
-    fn create_buffer_raw(&self, desc: &BufferDesc) -> Result<BufferHandle, GpuError>;
-    // Other low-level methods...
-}
-
-// Standard API (what most applications will use)
-pub struct GpuDevice {
-    // Internal fields...
-}
-
-impl GpuDevice {
-    pub fn create_buffer(&self, desc: BufferDesc) -> Result<Buffer, GpuError> {
-        // Implementation using GpuBackend...
+// Bare API (thin abstraction)
+pub mod bare {
+    pub struct BareDevice {
+        backend: Box<dyn GpuBackend>,
+        // Other fields...
     }
-    // Other standard methods...
-}
 
-// High-level API (convenience methods)
-impl GpuDevice {
-    pub fn create_vertex_buffer<T: VertexData>(&self, data: &[T]) -> Result<Buffer, GpuError> {
-        // Implementation using standard API...
+    impl BareDevice {
+        pub fn create_buffer_raw(&self, desc: &BufferDesc) -> Result<BufferHandle, GpuError> {
+            self.backend.create_buffer_raw(desc)
+        }
+        
+        pub fn create_texture_raw(&self, desc: &TextureDesc) -> Result<TextureHandle, GpuError> {
+            self.backend.create_texture_raw(desc)
+        }
+        
+        pub fn update_buffer_raw(&self, buffer: BufferHandle, data: &[u8], offset: usize) -> Result<(), GpuError> {
+            self.backend.update_buffer_raw(buffer, data, offset)
+        }
+        
+        // Other low-level methods with minimal overhead...
     }
-    // Other high-level methods...
 }
 ```
 
-This tiered approach allows developers to choose the appropriate level of abstraction for their needs. Most code will use the standard API, but performance-critical sections might drop down to the low-level API, while quick prototyping might use the high-level API.
+The Bare API is suitable for:
+- Performance-critical code paths where every CPU cycle matters
+- Low-level engine systems that need maximum control
+- Custom resource management systems
+- Advanced rendering techniques with specific requirements
+
+#### 2.1.2 Standard API
+
+The Standard API builds on top of the Bare API to provide a more ergonomic and safer interface for most application code:
+
+```rust
+// Standard API (what most applications will use)
+pub mod standard {
+    pub struct Device {
+        bare_device: Arc<bare::BareDevice>,
+        registry: Arc<ResourceRegistry>,
+        // Other fields...
+    }
+
+    impl Device {
+        pub fn create_buffer(&self, desc: BufferDesc) -> Result<Buffer, GpuError> {
+            let handle = self.bare_device.create_buffer_raw(&desc)?;
+            let buffer = Buffer::new(handle, Arc::downgrade(&self.bare_device));
+            self.registry.register_buffer(buffer.handle, desc);
+            Ok(buffer)
+        }
+        
+        pub fn create_texture(&self, desc: TextureDesc) -> Result<Texture, GpuError> {
+            let handle = self.bare_device.create_texture_raw(&desc)?;
+            let texture = Texture::new(handle, Arc::downgrade(&self.bare_device));
+            self.registry.register_texture(texture.handle, desc);
+            Ok(texture)
+        }
+        
+        // Convenience methods built on top of bare API
+        pub fn create_vertex_buffer<T: VertexData>(&self, data: &[T]) -> Result<Buffer, GpuError> {
+            let desc = BufferDesc::new(std::mem::size_of_val(data))
+                .usage(BufferUsage::VERTEX_BUFFER)
+                .memory_flags(MemoryFlags::GpuOnly);
+                
+            let buffer = self.create_buffer(desc)?;
+            buffer.update(0, bytemuck::cast_slice(data))?;
+            Ok(buffer)
+        }
+        
+        // Other standard methods...
+    }
+}
+```
+
+The Standard API provides:
+- Resource lifetime management
+- Type safety for GPU operations
+- Helpful error messages and validation
+- Simplified interfaces for common operations
+- Integration with the registry layer
+
+#### 2.1.3 Domain-Specific Rendering APIs (External)
+
+Instead of a built-in high-level API, Vectron GPU is designed to be used by domain-specific rendering crates that provide targeted functionality for different use cases:
+
+This approach has several advantages:
+- Separation of concerns between GPU abstraction and rendering logic
+- Ability to optimize rendering systems for specific domains (2D, 3D, UI, etc.)
+- More maintainable codebase with clearer boundaries
+- Support for multiple rendering paradigms without bloating the core GPU API
+
+By focusing on providing robust bare and standard APIs, Vectron GPU serves as a solid foundation for domain-specific rendering systems built on top of it, rather than trying to be a one-size-fits-all rendering solution.
 
 ### 2.2 Resource Types
 
@@ -193,6 +288,176 @@ let pipeline = device.create_pipeline(PipelineDesc::new()
 ```
 
 This approach simplifies shader management while providing strong type guarantees.
+
+### 2.5 Core Interfaces Organization
+
+The Vectron GPU architecture separates interface definitions from implementations through a structured organization that promotes clean separation of concerns:
+
+#### 2.5.1 Interface Layer
+
+The interface layer contains pure abstract definitions and type descriptors that define the capabilities of the system without concrete implementations:
+
+```
+vectron_gpu/src/interfaces/
+├── mod.rs              # Exports all interfaces
+├── backend.rs          # Backend trait definitions
+├── buffer.rs           # Buffer trait and descriptors
+├── texture.rs          # Texture trait and formats
+├── pipeline.rs         # Pipeline trait and states
+├── shader.rs           # Shader trait and types
+└── vertex.rs           # Vertex format definitions
+```
+
+These interfaces define the contract between the API layers and backend implementations:
+
+```rust
+// In interfaces/backend.rs
+pub trait GpuBackend: Send + Sync {
+    fn name(&self) -> &str;
+    fn features(&self) -> BackendFeatures;
+    
+    // Core initialization
+    fn init(&mut self, config: BackendConfig) -> Result<(), GpuError>;
+    
+    // Resource creation
+    fn create_buffer(&self, desc: &BufferDesc) -> Result<BufferId, GpuError>;
+    fn create_texture(&self, desc: &TextureDesc) -> Result<TextureId, GpuError>;
+    fn create_pipeline(&self, desc: &PipelineDesc) -> Result<PipelineId, GpuError>;
+    
+    // Command generation
+    fn create_command_buffer(&self) -> Result<CommandBufferId, GpuError>;
+    
+    // Other core methods...
+}
+
+// In interfaces/buffer.rs
+pub trait Buffer {
+    fn id(&self) -> BufferId;
+    fn desc(&self) -> &BufferDesc;
+    fn map(&mut self, offset: usize, size: usize) -> Result<*mut u8, GpuError>;
+    fn unmap(&mut self);
+}
+
+// Types required by the interfaces
+#[derive(Debug, Clone)]
+pub struct BufferDesc {
+    pub size: usize,
+    pub usage: BufferUsage,
+    pub memory_flags: MemoryFlags,
+    pub debug_name: Option<String>,
+}
+```
+
+#### 2.5.2 Integration with API Tiers
+
+Each API tier implements or builds upon these interfaces:
+
+```
+vectron_gpu/src/api/
+├── mod.rs              # Exports and API selection
+├── bare/               # Bare API (low-level) module
+│   ├── mod.rs          # Exports bare API components
+│   ├── device.rs       # Direct device interface
+│   └── ...             # Other bare API components
+└── standard/           # Standard API module
+    ├── mod.rs          # Exports standard API components
+    ├── device.rs       # User-friendly device interface
+    └── ...             # Other standard API components
+```
+
+This separation allows for different levels of abstraction while maintaining type safety and API consistency:
+
+```rust
+// Bare API directly exposes backend traits
+pub struct BareDevice {
+    backend: Box<dyn GpuBackend>,
+    // Other implementation details...
+}
+
+impl BareDevice {
+    // Direct pass-through to backend implementations
+    pub fn create_buffer(&self, desc: &BufferDesc) -> Result<BufferId, GpuError> {
+        self.backend.create_buffer(desc)
+    }
+}
+
+// Standard API provides resource tracking and management
+pub struct Device {
+    bare_device: Arc<BareDevice>,
+    registry: Arc<ResourceRegistry>,
+    // Other implementation details...
+}
+
+impl Device {
+    // More ergonomic API with resource tracking
+    pub fn create_buffer(&self, desc: BufferDesc) -> Result<Buffer, GpuError> {
+        let buffer_id = self.bare_device.create_buffer(&desc)?;
+        let handle = self.registry.register_buffer(buffer_id, desc);
+        Ok(Buffer::new(handle, Arc::downgrade(&self.device)))
+    }
+}
+```
+
+#### 2.5.3 Backend Implementations
+
+Backend implementations consume the interfaces and implement them for specific platforms:
+
+```
+vectron_gpu/src/backends/
+├── mod.rs              # Backend factory
+├── common/             # Shared utilities
+├── directx/            # DirectX backend
+│   ├── mod.rs
+│   ├── backend.rs      # Implements GpuBackend trait
+│   ├── buffer.rs       # Implements Buffer trait
+│   └── ...
+├── vulkan/             # Vulkan backend
+│   ├── mod.rs
+│   ├── backend.rs
+│   ├── buffer.rs
+│   └── ...
+└── ...                 # Other backends
+```
+
+Each backend implements the interface traits for its specific platform:
+
+```rust
+// DirectX 12 implementation of the Backend trait
+impl GpuBackend for DirectX12Backend {
+    fn name(&self) -> &str {
+        "DirectX 12"
+    }
+    
+    fn features(&self) -> BackendFeatures {
+        self.features.clone()
+    }
+    
+    fn create_buffer(&self, desc: &BufferDesc) -> Result<BufferId, GpuError> {
+        // DirectX 12-specific implementation
+        // ...
+    }
+    
+    // Other method implementations...
+}
+```
+
+#### 2.5.4 Benefits of This Organization
+
+This structured approach offers several advantages:
+
+1. **Clean Separation of Concerns**: Interfaces define contracts, API layers provide developer-facing utilities, and backends implement platform-specific behavior.
+
+2. **Type Safety**: The strongly-typed interfaces ensure consistency across backends and API layers.
+
+3. **Modularity**: New backends can be added without changing the interfaces or API layers.
+
+4. **Testability**: Each layer can be tested in isolation with mock implementations.
+
+5. **Documentation**: Interface definitions serve as clear documentation of system capabilities.
+
+6. **Feature Customization**: Feature flags can be applied at specific layers (e.g., enabling only needed backends).
+
+This interface organization complements the registry layer, debug system, and memory management components described elsewhere in the blueprint, providing a solid foundation for the entire Vectron GPU architecture.
 
 ## 3. Registry Layer
 
@@ -2461,6 +2726,7 @@ The Vectron GPU architecture provides a comprehensive foundation for graphics pr
 6. **Pipeline Optimization**: Caching and asynchronous creation for better performance
 7. **Concurrency**: Thread-safe design for multi-core utilization
 8. **Compilation Control**: Feature flags for minimal binary size
+9. **Interface Organization**: Clear separation between interface definitions and implementations
 
 ### 12.2 Project Structure
 
@@ -2473,6 +2739,32 @@ vectron_gpu/
 │
 ├── src/
 │   ├── lib.rs                  # Main entry point and public API
+│   │
+│   ├── interfaces/             # Core interface definitions
+│   │   ├── mod.rs              # Exports all interfaces
+│   │   ├── backend.rs          # Backend trait definitions
+│   │   ├── buffer.rs           # Buffer trait and descriptors
+│   │   ├── texture.rs          # Texture trait and formats
+│   │   ├── pipeline.rs         # Pipeline trait and states
+│   │   ├── shader.rs           # Shader trait and types
+│   │   └── vertex.rs           # Vertex format definitions
+│   │
+│   ├── api/                    # API tiers implementation
+│   │   ├── mod.rs              # Exports and API selection
+│   │   ├── bare/               # Bare API (low-level) module
+│   │   │   ├── mod.rs          # Exports bare API components
+│   │   │   ├── device.rs       # Direct device interface
+│   │   │   ├── resources.rs    # Raw resource handling
+│   │   │   ├── commands.rs     # Direct command building
+│   │   │   └── sync.rs         # Low-level synchronization
+│   │   │
+│   │   └── standard/           # Standard API module
+│   │       ├── mod.rs          # Exports standard API components
+│   │       ├── device.rs       # User-friendly device interface
+│   │       ├── resources.rs    # Resource creation and management
+│   │       ├── commands.rs     # Command buffer abstraction
+│   │       ├── pipelines.rs    # Pipeline state management
+│   │       └── sync.rs         # Synchronization primitives
 │   │
 │   ├── common/                 # Common types and utilities
 │   │   ├── mod.rs
@@ -2495,15 +2787,22 @@ vectron_gpu/
 │   ├── backends/               # Backend implementations
 │   │   ├── mod.rs              # Backend factory
 │   │   │
+│   │   ├── common/             # Shared backend utilities
+│   │   │   ├── mod.rs
+│   │   │   ├── command_ext.rs  # Common command utilities
+│   │   │   └── resource_ext.rs # Resource management helpers
+│   │   │
 │   │   ├── directx/            # DirectX backend
 │   │   │   ├── mod.rs          # Public exports
-│   │   │   ├── dx12.rs         # Main implementation
+│   │   │   ├── backend.rs      # Main trait implementation
+│   │   │   ├── buffer.rs       # Buffer implementation
 │   │   │   ├── debug.rs        # DirectX-specific debug
 │   │   │   └── error.rs        # DirectX-specific errors
 │   │   │
 │   │   ├── vulkan/             # Vulkan backend
 │   │   │   ├── mod.rs
-│   │   │   ├── vulkan.rs
+│   │   │   ├── backend.rs
+│   │   │   ├── buffer.rs
 │   │   │   ├── debug.rs
 │   │   │   └── error.rs
 │   │   │
