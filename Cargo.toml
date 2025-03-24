@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "vectron_embedder",
-    "vectron_gpu",
+    "vectron_gpu", 
+    "vectron_render",
 ]
 resolver = "2"
 

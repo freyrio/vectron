@@ -50,6 +50,7 @@ The Vectron Render crate provides a flexible rendering system that builds on top
 - **Performance**: Efficient rendering with minimal overhead
 - **Composition**: Stackable operations for complex rendering effects
 - **Platform Independence**: Works across platforms through the GPU abstraction
+- **Unified Approach**: Consistent handling of both 2D and 3D rendering
 
 ### Architecture Layers
 
@@ -206,11 +207,14 @@ The rendering system is built around a composable operation pattern that focuses
 ```rust
 // Core trait for anything that can be drawn
 pub trait Drawable {
-    // Convert this object to geometry for rendering
-    fn to_geometry(&self, context: &RenderContext) -> Result<GeometryData, RenderError>;
+    // Generalized geometry type to support both 2D and 3D
+    type GeometryType;
     
-    // Get bounding box for this drawable object
-    fn bounds(&self) -> Rect;
+    // Convert this object to geometry for rendering
+    fn to_geometry(&self, context: &RenderContext) -> Result<Self::GeometryType, RenderError>;
+    
+    // Get bounding volume for this drawable object
+    fn bounds(&self) -> impl BoundingVolume;
     
     // Optional optimization hint for renderers
     fn render_hints(&self) -> RenderHints {
@@ -218,8 +222,23 @@ pub trait Drawable {
     }
 }
 
-// Unified operation type that combines a drawable with styling and effects
-pub struct Operation<D: Drawable> {
+// 2D drawable specialization
+pub trait Drawable2D: Drawable<GeometryType = Geometry2D> {
+    // 2D-specific methods
+}
+
+// 3D drawable specialization
+pub trait Drawable3D: Drawable<GeometryType = Geometry3D> {
+    // 3D-specific methods
+}
+
+// Base operation trait
+pub trait Operation {
+    fn execute(&self, renderer: &mut dyn Renderer) -> Result<(), RenderError>;
+}
+
+// 2D operation implementation
+pub struct Draw2D<D: Drawable2D> {
     drawable: D,
     styles: Vec<Box<dyn Style>>,
     effects: Vec<Box<dyn Effect>>,
@@ -227,7 +246,7 @@ pub struct Operation<D: Drawable> {
     clip: Option<Rect>,
 }
 
-impl<D: Drawable> Operation<D> {
+impl<D: Drawable2D> Draw2D<D> {
     pub fn new(drawable: D) -> Self {
         Self {
             drawable,
@@ -258,9 +277,10 @@ impl<D: Drawable> Operation<D> {
         self.clip = Some(clip);
         self
     }
-    
-    // Execute this operation on a renderer
-    pub fn execute(&self, renderer: &mut dyn Renderer) -> Result<(), RenderError> {
+}
+
+impl<D: Drawable2D> Operation for Draw2D<D> {
+    fn execute(&self, renderer: &mut dyn Renderer) -> Result<(), RenderError> {
         // Save current state
         renderer.push_state();
         
@@ -287,6 +307,69 @@ impl<D: Drawable> Operation<D> {
         for effect in &self.effects {
             effect.apply_post(renderer, &geometry)?;
         }
+        
+        // Restore state
+        renderer.pop_state();
+        
+        Ok(())
+    }
+}
+
+// 3D operation implementation
+pub struct Draw3D<M: Mesh> {
+    mesh: M,
+    material: Material,
+    transform: Transform,
+    camera: Option<CameraHandle>,
+}
+
+impl<M: Mesh> Draw3D<M> {
+    pub fn new(mesh: M) -> Self {
+        Self {
+            mesh,
+            material: Material::default(),
+            transform: Transform::identity(),
+            camera: None,
+        }
+    }
+    
+    pub fn with_material(mut self, material: Material) -> Self {
+        self.material = material;
+        self
+    }
+    
+    pub fn with_transform(mut self, transform: Transform) -> Self {
+        self.transform = transform;
+        self
+    }
+    
+    pub fn with_camera(mut self, camera: CameraHandle) -> Self {
+        self.camera = Some(camera);
+        self
+    }
+}
+
+impl<M: Mesh> Operation for Draw3D<M> {
+    fn execute(&self, renderer: &mut dyn Renderer) -> Result<(), RenderError> {
+        // Save current state
+        renderer.push_state();
+        
+        // Set transform
+        renderer.set_transform(self.transform);
+        
+        // Convert mesh to geometry
+        let geometry = self.mesh.to_geometry(renderer.context())?;
+        
+        // Set up material and transform
+        renderer.set_material(&self.material)?;
+        
+        // Set camera if provided
+        if let Some(camera) = self.camera {
+            renderer.set_camera(camera)?;
+        }
+        
+        // Render the geometry
+        renderer.draw_geometry(geometry)?;
         
         // Restore state
         renderer.pop_state();
@@ -455,21 +538,9 @@ impl Effect for Shadow {
     }
 }
 
-// Command system for executing operations
+// Command list for executing operations
 pub struct CommandList {
-    operations: Vec<Box<dyn CommandOperation>>,
-}
-
-// Trait for anything that can be executed as a command
-pub trait CommandOperation {
-    fn execute(&self, renderer: &mut dyn Renderer) -> Result<(), RenderError>;
-}
-
-// Implement CommandOperation for our Operation<D> type
-impl<D: Drawable + 'static> CommandOperation for Operation<D> {
-    fn execute(&self, renderer: &mut dyn Renderer) -> Result<(), RenderError> {
-        self.execute(renderer)
-    }
+    operations: Vec<Box<dyn Operation>>,
 }
 
 impl CommandList {
@@ -479,7 +550,7 @@ impl CommandList {
         }
     }
     
-    pub fn add<D: Drawable + 'static>(&mut self, operation: Operation<D>) -> &mut Self {
+    pub fn add<O: Operation + 'static>(&mut self, operation: O) -> &mut Self {
         self.operations.push(Box::new(operation));
         self
     }
@@ -495,32 +566,32 @@ impl CommandList {
         Ok(())
     }
 }
-```
 
-This design allows for creating complex rendering operations from simple building blocks:
-
-```rust
-// Example of creating operations with the builder pattern
+// Example usage showing operation composition
 let renderer = Renderer::new(device)?;
 let mut command_list = CommandList::new();
 
 // Create a rectangle with fill, stroke and shadow
-let rect_operation = Operation::new(Rectangle::new(10.0, 10.0, 100.0, 50.0))
+let rect_operation = Draw2D::new(Rectangle::new(10.0, 10.0, 100.0, 50.0))
     .with_effect(Shadow::new(Color::rgba(0.0, 0.0, 0.0, 0.5), Vec2::new(2.0, 2.0), 4.0))
     .with_style(Fill::solid(color_constants::BLUE))
     .with_style(Stroke::new(Paint::Solid(color_constants::BLACK), 2.0))
     .with_transform(Transform::rotation(45.0));
 
-// Create a text operation
-let text_operation = Operation::new(Text::new("Hello, World!", font, 24.0))
-    .with_style(Fill::solid(color_constants::WHITE))
-    .with_transform(Transform::translation(20.0, 30.0))
-    .with_effect(Glow::new(Color::rgba(1.0, 1.0, 1.0, 0.7), 2.0));
+// Create a 3D cube with material
+let cube_operation = Draw3D::new(Cube::new(1.0))
+    .with_material(Material::pbr(Albedo::color(Color::rgb(0.8, 0.2, 0.2)), 0.7, 0.3))
+    .with_transform(Transform::from_translation_rotation_scale(
+        Vec3::new(0.0, 0.0, -5.0),
+        Quaternion::from_euler(0.0, 45.0, 0.0),
+        Vec3::new(1.0, 1.0, 1.0)
+    ))
+    .with_camera(main_camera);
 
 // Add operations to command list
 command_list
     .add(rect_operation)
-    .add(text_operation);
+    .add(cube_operation);
 
 // Execute all operations
 renderer.begin_frame(width, height);
@@ -1330,7 +1401,7 @@ impl CommandTranslator {
     // Translate a single operation to GPU commands
     fn translate_operation(
         &mut self,
-        operation: &dyn CommandOperation,
+        operation: &dyn Operation,
         cmd: &mut CommandBuffer,
         resources: &ResourceCache
     ) -> Result<(), RenderError> {
@@ -1744,7 +1815,7 @@ impl BatchingSystem {
     // Try to add an operation to a batch
     pub fn try_batch(
         &mut self, 
-        operation: &dyn CommandOperation,
+        operation: &dyn Operation,
         renderer: &Renderer
     ) -> Result<bool, RenderError> {
         // Check if the operation can be batched
@@ -2276,6 +2347,14 @@ vectron_render/
 │   │   ├── style.rs    # Style trait and implementations
 │   │   ├── effect.rs   # Effect trait and implementations
 │   │   ├── color.rs    # Color types and operations
+│   │   ├── math/       # Unified math for 2D/3D operations
+│   │   │   ├── mod.rs
+│   │   │   ├── vector.rs      # 2D/3D vectors
+│   │   │   ├── matrix.rs      # Matrix math (2x3, 3x3, 4x4)
+│   │   │   ├── quaternion.rs  # Quaternion rotations
+│   │   │   └── geometry.rs    # Basic geometric primitives
+│   │   │
+│   │   ├── transform.rs # Unified 2D/3D transform system
 │   │   └── operation.rs # Operation composition system
 │   │
 │   ├── api/            # API layer modules
@@ -2284,7 +2363,7 @@ vectron_render/
 │   │   ├── standard/   # Standard rendering API
 │   │   ├── vector/     # 2D vector graphics API
 │   │   ├── text/       # Text rendering API
-│   │   └── three_d/    # 3D rendering API
+│   │   └── three_d/    # 3D rendering API (specialized extensions)
 │   │
 │   ├── commands/       # Command system implementation
 │   │   ├── mod.rs
@@ -2295,7 +2374,7 @@ vectron_render/
 │   ├── resources/      # Resource management
 │   │   ├── mod.rs
 │   │   ├── cache.rs    # Resource caching system
-│   │   ├── geometry.rs # Geometry management
+│   │   ├── geometry.rs # Generic geometry management (2D & 3D)
 │   │   ├── texture.rs  # Texture management
 │   │   └── font.rs     # Font management
 │   │
@@ -2333,7 +2412,8 @@ vectron_render/
 │   ├── text_layout.rs
 │   ├── vector_graph.rs
 │   ├── command_composition.rs # Demo of the operation composition system
-│   └── three_d_scene.rs
+│   ├── three_d_scene.rs
+│   └── unified_2d_3d.rs       # Demo showing combined 2D and 3D rendering
 │
 └── tests/              # Integration tests
     ├── api_tests.rs
@@ -2349,6 +2429,8 @@ The Vectron Render crate provides a comprehensive, flexible, and high-performanc
 Key features include:
 - Multiple API tiers for different levels of control and abstraction
 - Comprehensive vector, text, and 3D rendering capabilities
+- Unified math framework supporting both 2D and 3D operations
+- Dimension-agnostic core traits with specialized implementations
 - Efficient resource management with caching and pooling
 - Specialized rendering pipelines optimized for different tasks
 - Core color system for consistent color representation across the renderer

@@ -1,0 +1,41 @@
+[package]
+name = "vectron_render"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description.workspace = true
+license.workspace = true
+
+[dependencies]
+# Basic dependencies
+thiserror = "1.0"
+log = "0.4"
+
+# Optional dependencies (feature-gated)
+rayon = { version = "1.5", optional = true }
+smallvec = { version = "1.10", optional = true }
+lru = { version = "0.10", optional = true }
+
+[features]
+default = ["vector", "text", "effect"]
+
+# Core APIs
+vector = []
+text = []
+three_d = []
+
+# Advanced features
+effect = []
+animation = []
+svg = ["vector"]
+high_quality = []
+
+# Optimizations
+parallel = ["rayon"]
+caching = ["lru"]
+small_size = ["smallvec"]
+
+# Debug features
+debug_visualization = []
+profile = []
+capture = []
