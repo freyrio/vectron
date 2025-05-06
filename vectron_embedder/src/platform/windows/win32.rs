@@ -6,7 +6,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::core::PCWSTR;
 
 use crate::embedder::{Embedder, EmbedderConfig, EmbedderError, Event, Surface};
-use crate::window::{WindowConfig, WindowEmbedder, WindowHandle, WindowError};
+use crate::window::{WindowConfig, WindowEmbedder, WindowId, WindowError, Window};
 
 const WINDOW_CLASS_NAME: &str = "VectronWindowClass";
 
@@ -15,15 +15,15 @@ struct Win32WindowData {
     title: String,
     width: u32,
     height: u32,
-    parent: Option<WindowHandle>,
+    parent: Option<WindowId>,
     scale_factor: f32,
 }
 
 pub struct Win32Embedder {
     instance: HMODULE,
-    windows: HashMap<WindowHandle, Win32WindowData>,
+    windows: HashMap<WindowId, Win32WindowData>,
     running: bool,
-    next_handle: WindowHandle,
+    next_handle: WindowId,
     event_queue: VecDeque<Event>,
     config: Option<EmbedderConfig>,
 }
@@ -96,7 +96,7 @@ impl Win32Embedder {
         }
     }
 
-    fn get_window_scale_factor(&self, handle: WindowHandle) -> f32 {
+    fn get_window_scale_factor(&self, handle: WindowId) -> f32 {
         if let Some(window) = self.windows.get(&handle) {
             window.scale_factor
         } else {
@@ -106,7 +106,7 @@ impl Win32Embedder {
 }
 
 impl Embedder for Win32Embedder {
-    type Handle = WindowHandle;
+    type Handle = WindowId;
 
     fn init(&mut self, config: EmbedderConfig) -> Result<(), EmbedderError> {
         self.config = Some(config);
@@ -149,7 +149,7 @@ impl Embedder for Win32Embedder {
         self.running
     }
 
-    fn get_surface(&self, handle: WindowHandle) -> Result<Surface, EmbedderError> {
+    fn get_surface(&self, handle: WindowId) -> Result<Surface, EmbedderError> {
         let window = self.windows.get(&handle).ok_or(EmbedderError::InvalidHandle)?;
         Ok(Surface {
             handle: window.hwnd.0 as *mut std::ffi::c_void,
@@ -159,7 +159,7 @@ impl Embedder for Win32Embedder {
         })
     }
 
-    fn request_redraw(&mut self, handle: WindowHandle) {
+    fn request_redraw(&mut self, handle: WindowId) {
         if let Some(window) = self.windows.get(&handle) {
             unsafe {
                 let rect: Option<*const RECT> = None;
@@ -181,7 +181,7 @@ impl Embedder for Win32Embedder {
 }
 
 impl WindowEmbedder for Win32Embedder {
-    fn create_window(&mut self, config: WindowConfig) -> Result<WindowHandle, WindowError> {
+    fn create_window(&mut self, config: &WindowConfig) -> Result<WindowId, WindowError> {
         unsafe {
             let style = if config.decorated {
                 WS_OVERLAPPEDWINDOW
@@ -224,7 +224,7 @@ impl WindowEmbedder for Win32Embedder {
 
             let window_data = Win32WindowData {
                 hwnd,
-                title: config.title,
+                title: config.title.clone(),
                 width: config.width,
                 height: config.height,
                 parent: config.parent,
@@ -241,34 +241,46 @@ impl WindowEmbedder for Win32Embedder {
             Ok(handle)
         }
     }
-
-    fn destroy_window(&mut self, handle: WindowHandle) {
-        if let Some(window) = self.windows.remove(&handle) {
+    
+    fn get_window(&self, handle: &WindowId) -> Option<Window> {
+        self.windows.get(handle).map(|win_data| {
+            Window::new(
+                self as *const _ as *mut std::ffi::c_void,
+                *handle,
+                win_data.hwnd.0 as *mut std::ffi::c_void,
+                win_data.width,
+                win_data.height,
+            )
+        })
+    }
+    
+    fn destroy_window(&mut self, handle: &WindowId) {
+        if let Some(window) = self.windows.remove(handle) {
             unsafe {
                 let _ = DestroyWindow(window.hwnd);
             }
         }
     }
-
-    fn show_window(&mut self, handle: WindowHandle) {
-        if let Some(window) = self.windows.get(&handle) {
+    
+    fn show_window(&mut self, handle: &WindowId) {
+        if let Some(window) = self.windows.get(handle) {
             unsafe {
                 let _ = ShowWindow(window.hwnd, SW_SHOW);
                 let _ = RedrawWindow(Some(window.hwnd), None, Some(HRGN::default()), RDW_INVALIDATE | RDW_UPDATENOW);
             }
         }
     }
-
-    fn hide_window(&mut self, handle: WindowHandle) {
-        if let Some(window) = self.windows.get(&handle) {
+    
+    fn hide_window(&mut self, handle: &WindowId) {
+        if let Some(window) = self.windows.get(handle) {
             unsafe {
                 ShowWindow(window.hwnd, SW_HIDE);
             }
         }
     }
-
-    fn set_window_title(&mut self, handle: WindowHandle, title: &str) {
-        if let Some(window) = self.windows.get_mut(&handle) {
+    
+    fn set_window_title(&mut self, handle: &WindowId, title: &str) {
+        if let Some(window) = self.windows.get_mut(handle) {
             unsafe {
                 let title_wide = title.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
                 let title_ptr = PCWSTR::from_raw(title_wide.as_ptr());
@@ -277,9 +289,9 @@ impl WindowEmbedder for Win32Embedder {
             window.title = title.to_string();
         }
     }
-
-    fn set_window_size(&mut self, handle: WindowHandle, width: u32, height: u32) {
-        if let Some(window) = self.windows.get_mut(&handle) {
+    
+    fn set_window_size(&mut self, handle: &WindowId, width: u32, height: u32) {
+        if let Some(window) = self.windows.get_mut(handle) {
             unsafe {
                 let _ = SetWindowPos(
                     window.hwnd,
@@ -295,17 +307,17 @@ impl WindowEmbedder for Win32Embedder {
             window.height = height;
         }
     }
-
-    fn get_window_size(&self, handle: WindowHandle) -> (u32, u32) {
-        if let Some(window) = self.windows.get(&handle) {
+    
+    fn get_window_size(&self, handle: &WindowId) -> (u32, u32) {
+        if let Some(window) = self.windows.get(handle) {
             (window.width, window.height)
         } else {
             (0, 0)
         }
     }
-
-    fn set_window_position(&mut self, handle: WindowHandle, x: i32, y: i32) {
-        if let Some(window) = self.windows.get(&handle) {
+    
+    fn set_window_position(&mut self, handle: &WindowId, x: i32, y: i32) {
+        if let Some(window) = self.windows.get(handle) {
             unsafe {
                 let _ = SetWindowPos(
                     window.hwnd,
@@ -319,9 +331,9 @@ impl WindowEmbedder for Win32Embedder {
             }
         }
     }
-
-    fn get_window_position(&self, handle: WindowHandle) -> (i32, i32) {
-        if let Some(window) = self.windows.get(&handle) {
+    
+    fn get_window_position(&self, handle: &WindowId) -> (i32, i32) {
+        if let Some(window) = self.windows.get(handle) {
             unsafe {
                 let mut rect = RECT::default();
                 GetWindowRect(window.hwnd, &mut rect);
@@ -331,16 +343,16 @@ impl WindowEmbedder for Win32Embedder {
             (0, 0)
         }
     }
-
-    fn set_window_parent(&mut self, handle: WindowHandle, parent: WindowHandle) {
+    
+    fn set_window_parent(&mut self, handle: &WindowId, parent: &WindowId) {
         // Get parent HWND first before mutably borrowing
-        let parent_hwnd = self.windows.get(&parent).map(|parent_window| parent_window.hwnd);
+        let parent_hwnd = self.windows.get(parent).map(|parent_window| parent_window.hwnd);
         
-        if let (Some(window), Some(parent_hwnd)) = (self.windows.get_mut(&handle), parent_hwnd) {
+        if let (Some(window), Some(parent_hwnd)) = (self.windows.get_mut(handle), parent_hwnd) {
             unsafe {
                 SetParent(window.hwnd, Some(parent_hwnd));
             }
-            window.parent = Some(parent);
+            window.parent = Some(*parent);
         }
     }
 }

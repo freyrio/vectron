@@ -1,0 +1,17 @@
+[package]
+name = "vectron_app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Application framework for Vectron"
+license.workspace = true
+
+[dependencies]
+vectron_embedder = { path = "../vectron_embedder" }
+vectron_wgpu = { path = "../vectron_wgpu" }
+wgpu = { version = "25.0.0", default-features = false, features = ["vulkan"] }
+raw-window-handle = "~0.6.0"
+
+[[example]]
+name = "basic_window"
+path = "examples/basic_window.rs"

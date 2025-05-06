@@ -15,4 +15,4 @@ pub use shader::{ShaderDescriptor, ShaderStage, ShaderSource, ShaderLanguage};
 pub use texture::TextureFormat;
 pub use vertex::{VertexAttribute, VertexBufferLayout, VertexStepMode, VertexAttributeDescriptor, VertexFormat, VertexLayoutDescriptor };
 pub use common::GpuError;
-pub use debug::{GpuLogger, GpuProfiler, ResourceTracker};
+//pub use debug::{GpuLogger, GpuProfiler, ResourceTracker};

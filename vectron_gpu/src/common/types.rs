@@ -1,6 +1,9 @@
 /// Resource ID type aliases
 pub type ResourceId = u64;
-pub type SurfaceId = u64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SurfaceId(pub u64);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BufferId(pub u64);
 pub type TextureId = u64;

@@ -32,6 +32,19 @@ pub struct BackendCapabilities {
     pub max_color_attachments: u32,
 }
 
+impl Default for BackendCapabilities {
+    fn default() -> Self {
+        Self {
+            max_texture_size: 8192,
+            supports_compute: false,
+            supports_storage_buffers: false,
+            supports_float_textures: false,
+            max_uniform_buffer_size: 0,
+            max_color_attachments: 0,
+        }
+    }
+}
+
 /// Base render command enum
 #[derive(Debug, Clone)]
 pub enum RenderCommand {

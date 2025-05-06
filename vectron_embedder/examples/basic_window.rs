@@ -1,6 +1,6 @@
 use std::time::Duration;
 use std::thread::sleep;
-use vectron_embedder::{Embedder, EmbedderConfig, Event, WindowConfig, WindowEmbedder, PlatformEmbedder};
+use vectron_embedder::{Embedder, EmbedderConfig, Event, WindowConfig, WindowEmbedder, PlatformEmbedder, WindowId};
 
 fn main() {
     println!("Starting Vectron Window Example");
@@ -18,20 +18,16 @@ fn main() {
     println!("Embedder initialized");
     
     // Create a window with standard configuration
-    let window = embedder.create_window(WindowConfig {
-        title: "Vectron Basic Window".to_string(),
-        width: 800,
-        height: 600,
-        resizable: true,
-        decorated: true,
-        visible: true,
-        position: None,
-        min_size: None,
-        max_size: None,
-        parent: None,
-    }).expect("Failed to create window");
+    let window_config = WindowConfig::new()
+        .with_title("Vectron Basic Window")
+        .with_size(800, 600)
+        .with_resizable(true)
+        .with_decorated(true)
+        .with_visible(true);
+        
+    let window_id = embedder.create_window(&window_config).expect("Failed to create window");
     
-    println!("Window created with handle: {:?}", window);
+    println!("Window created with handle: {:?}", window_id);
     
     // Basic event loop
     let mut frame_count = 0;
@@ -61,14 +57,14 @@ fn main() {
             println!("Frame count: {}", frame_count);
             
             // Get current window size and position for demonstration
-            let size = embedder.get_window_size(window);
-            let position = embedder.get_window_position(window);
+            let size = embedder.get_window_size(&window_id);
+            let position = embedder.get_window_position(&window_id);
             
             println!("Window size: {}x{}", size.0, size.1);
             println!("Window position: ({}, {})", position.0, position.1);
             
-            // Request a redraw
-            embedder.request_redraw(window);
+            // Request a redraw (Embedder trait takes value, not reference)
+            embedder.request_redraw(window_id);
         }
         
         // Small sleep to avoid maxing CPU
@@ -78,7 +74,7 @@ fn main() {
     }
     
     // Clean up
-    embedder.destroy_window(window);
+    embedder.destroy_window(&window_id);
     embedder.shutdown();
     
     println!("Example completed successfully");

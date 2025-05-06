@@ -1,611 +1,433 @@
-/*!
- * Unified 2D/3D transformation types and operations
- */
-use crate::core::math::{
-    Vec2, Vec3, Vec4, Mat3, Mat4, Quaternion, Rect, BoundingBox, deg_to_rad
-};
+use crate::core::types::{Point2D, Point3D, Vec2, Vec3, Vec4};
+use std::ops::Mul;
 
-/// Represents a 2D or 3D transformation
-#[derive(Clone, Debug, PartialEq)]
-pub enum Transform {
-    /// 2D transformation using a 3x3 matrix
-    Mat3(Mat3),
-    /// 3D transformation using a 4x4 matrix
-    Mat4(Mat4),
+/// Column-major 3x3 matrix for 2D transformations
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Mat3 {
+    // Stored as a flat array in column-major order
+    // [c0r0, c0r1, c0r2, c1r0, c1r1, c1r2, c2r0, c2r1, c2r2]
+    pub elements: [f32; 9],
 }
 
-impl Transform {
-    /// Create identity transform (no transformation)
-    #[inline]
+/// Column-major 4x4 matrix for 3D transformations
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Mat4 {
+    // Stored as a flat array in column-major order
+    // [c0r0, c0r1, c0r2, c0r3, c1r0, c1r1, ...]
+    pub elements: [f32; 16],
+}
+
+/// 2D affine transform (internally uses a 3x3 matrix)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transform2D {
+    pub matrix: Mat3,
+}
+
+/// 3D transform (internally uses a 4x4 matrix)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transform3D {
+    pub matrix: Mat4,
+}
+
+/// Generic transform that can be either 2D or 3D
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Transform {
+    Transform2D(Transform2D),
+    Transform3D(Transform3D),
+}
+
+impl Mat3 {
+    /// Create a new 3x3 matrix from individual elements in column-major order
+    pub fn new(elements: [f32; 9]) -> Self {
+        Self { elements }
+    }
+    
+    /// Create an identity matrix
     pub fn identity() -> Self {
-        Transform::Mat4(Mat4::identity())
+        Self {
+            elements: [
+                1.0, 0.0, 0.0,
+                0.0, 1.0, 0.0,
+                0.0, 0.0, 1.0,
+            ],
+        }
     }
     
-    /// Create 2D identity transform
-    #[inline]
-    pub fn identity_2d() -> Self {
-        Transform::Mat3(Mat3::identity())
+    /// Get an element at the specified row and column
+    pub fn get(&self, row: usize, col: usize) -> f32 {
+        self.elements[col * 3 + row]
     }
     
-    /// Create 3D identity transform
-    #[inline]
-    pub fn identity_3d() -> Self {
-        Transform::Mat4(Mat4::identity())
+    /// Set an element at the specified row and column
+    pub fn set(&mut self, row: usize, col: usize, value: f32) {
+        self.elements[col * 3 + row] = value;
+    }
+}
+
+impl Mat4 {
+    /// Create a new 4x4 matrix from individual elements in column-major order
+    pub fn new(elements: [f32; 16]) -> Self {
+        Self { elements }
+    }
+    
+    /// Create an identity matrix
+    pub fn identity() -> Self {
+        Self {
+            elements: [
+                1.0, 0.0, 0.0, 0.0,
+                0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 1.0, 0.0,
+                0.0, 0.0, 0.0, 1.0,
+            ],
+        }
+    }
+    
+    /// Get an element at the specified row and column
+    pub fn get(&self, row: usize, col: usize) -> f32 {
+        self.elements[col * 4 + row]
+    }
+    
+    /// Set an element at the specified row and column
+    pub fn set(&mut self, row: usize, col: usize, value: f32) {
+        self.elements[col * 4 + row] = value;
+    }
+}
+
+impl Mul for Mat3 {
+    type Output = Mat3;
+    
+    fn mul(self, rhs: Mat3) -> Mat3 {
+        let mut result = Mat3::new([0.0; 9]);
+        
+        for row in 0..3 {
+            for col in 0..3 {
+                let mut sum = 0.0;
+                for i in 0..3 {
+                    sum += self.get(row, i) * rhs.get(i, col);
+                }
+                result.set(row, col, sum);
+            }
+        }
+        
+        result
+    }
+}
+
+impl Mul for Mat4 {
+    type Output = Mat4;
+    
+    fn mul(self, rhs: Mat4) -> Mat4 {
+        let mut result = Mat4::new([0.0; 16]);
+        
+        for row in 0..4 {
+            for col in 0..4 {
+                let mut sum = 0.0;
+                for i in 0..4 {
+                    sum += self.get(row, i) * rhs.get(i, col);
+                }
+                result.set(row, col, sum);
+            }
+        }
+        
+        result
+    }
+}
+
+impl Transform2D {
+    /// Create a new 2D transform from a 3x3 matrix
+    pub fn new(matrix: Mat3) -> Self {
+        Self { matrix }
+    }
+    
+    /// Create an identity transform
+    pub fn identity() -> Self {
+        Self { matrix: Mat3::identity() }
     }
     
     /// Create a translation transform
-    #[inline]
-    pub fn translation(x: f32, y: f32, z: f32) -> Self {
-        Transform::Mat4(Mat4::translation(x, y, z))
+    pub fn translation(x: f32, y: f32) -> Self {
+        let mut matrix = Mat3::identity();
+        matrix.set(0, 2, x);
+        matrix.set(1, 2, y);
+        Self { matrix }
     }
     
-    /// Create a 2D translation transform
-    #[inline]
-    pub fn translation_2d(x: f32, y: f32) -> Self {
-        Transform::Mat3(Mat3::translation(x, y))
-    }
-    
-    /// Create a 3D translation transform
-    #[inline]
-    pub fn translation_3d(x: f32, y: f32, z: f32) -> Self {
-        Transform::Mat4(Mat4::translation(x, y, z))
-    }
-    
-    /// Create a translation transform from a Vec2
-    #[inline]
-    pub fn from_translation_2d(translation: Vec2) -> Self {
-        Transform::Mat3(Mat3::translation(translation.x, translation.y))
-    }
-    
-    /// Create a translation transform from a Vec3
-    #[inline]
-    pub fn from_translation_3d(translation: Vec3) -> Self {
-        Transform::Mat4(Mat4::translation(translation.x, translation.y, translation.z))
+    /// Create a rotation transform
+    pub fn rotation(radians: f32) -> Self {
+        let cos = radians.cos();
+        let sin = radians.sin();
+        
+        let mut matrix = Mat3::identity();
+        matrix.set(0, 0, cos);
+        matrix.set(0, 1, -sin);
+        matrix.set(1, 0, sin);
+        matrix.set(1, 1, cos);
+        
+        Self { matrix }
     }
     
     /// Create a scaling transform
-    #[inline]
-    pub fn scaling(x: f32, y: f32, z: f32) -> Self {
-        Transform::Mat4(Mat4::scaling(x, y, z))
-    }
-    
-    /// Create a 2D scaling transform
-    #[inline]
-    pub fn scaling_2d(x: f32, y: f32) -> Self {
-        Transform::Mat3(Mat3::scaling(x, y))
-    }
-    
-    /// Create a 3D scaling transform
-    #[inline]
-    pub fn scaling_3d(x: f32, y: f32, z: f32) -> Self {
-        Transform::Mat4(Mat4::scaling(x, y, z))
-    }
-    
-    /// Create a uniform scaling transform
-    #[inline]
-    pub fn uniform_scaling(scale: f32) -> Self {
-        Transform::Mat4(Mat4::scaling(scale, scale, scale))
-    }
-    
-    /// Create a 2D uniform scaling transform
-    #[inline]
-    pub fn uniform_scaling_2d(scale: f32) -> Self {
-        Transform::Mat3(Mat3::scaling(scale, scale))
-    }
-    
-    /// Create a 3D uniform scaling transform
-    #[inline]
-    pub fn uniform_scaling_3d(scale: f32) -> Self {
-        Transform::Mat4(Mat4::scaling(scale, scale, scale))
-    }
-    
-    /// Create a 2D rotation transform (around z-axis)
-    #[inline]
-    pub fn rotation_2d(angle_degrees: f32) -> Self {
-        Transform::Mat3(Mat3::rotation(deg_to_rad(angle_degrees)))
-    }
-    
-    /// Create a 3D rotation transform around the X axis
-    #[inline]
-    pub fn rotation_x(angle_degrees: f32) -> Self {
-        Transform::Mat4(Mat4::rotation_x(deg_to_rad(angle_degrees)))
-    }
-    
-    /// Create a 3D rotation transform around the Y axis
-    #[inline]
-    pub fn rotation_y(angle_degrees: f32) -> Self {
-        Transform::Mat4(Mat4::rotation_y(deg_to_rad(angle_degrees)))
-    }
-    
-    /// Create a 3D rotation transform around the Z axis
-    #[inline]
-    pub fn rotation_z(angle_degrees: f32) -> Self {
-        Transform::Mat4(Mat4::rotation_z(deg_to_rad(angle_degrees)))
-    }
-    
-    /// Create a 3D rotation transform from Euler angles (degrees)
-    #[inline]
-    pub fn from_euler(yaw: f32, pitch: f32, roll: f32) -> Self {
-        let quat = Quaternion::from_euler(
-            deg_to_rad(yaw), 
-            deg_to_rad(pitch), 
-            deg_to_rad(roll)
-        );
-        Transform::Mat4(Mat4::from_quaternion(&quat))
-    }
-    
-    /// Create a 3D rotation transform from a quaternion
-    #[inline]
-    pub fn from_quaternion(quaternion: &Quaternion) -> Self {
-        Transform::Mat4(Mat4::from_quaternion(quaternion))
-    }
-    
-    /// Create a 3D rotation transform from an axis and angle (in degrees)
-    #[inline]
-    pub fn from_axis_angle(axis: Vec3, angle_degrees: f32) -> Self {
-        let quat = Quaternion::from_axis_angle(axis, deg_to_rad(angle_degrees));
-        Transform::Mat4(Mat4::from_quaternion(&quat))
-    }
-    
-    /// Create a look-at view transform
-    #[inline]
-    pub fn look_at(eye: Vec3, target: Vec3, up: Vec3) -> Self {
-        Transform::Mat4(Mat4::look_at(eye, target, up))
-    }
-    
-    /// Create a perspective projection transform
-    #[inline]
-    pub fn perspective(fov_y_degrees: f32, aspect_ratio: f32, near: f32, far: f32) -> Self {
-        Transform::Mat4(Mat4::perspective(deg_to_rad(fov_y_degrees), aspect_ratio, near, far))
-    }
-    
-    /// Create an orthographic projection transform
-    #[inline]
-    pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> Self {
-        Transform::Mat4(Mat4::orthographic(left, right, bottom, top, near, far))
-    }
-    
-    /// Convert to a Mat3 if possible, or flatten a Mat4 to a Mat3
-    #[inline]
-    pub fn to_mat3(&self) -> Mat3 {
-        match self {
-            Transform::Mat3(m) => *m,
-            Transform::Mat4(m) => Mat3::new(
-                m.get(0, 0), m.get(0, 1), m.get(0, 3),
-                m.get(1, 0), m.get(1, 1), m.get(1, 3),
-                m.get(3, 0), m.get(3, 1), m.get(3, 3),
-            ),
-        }
-    }
-    
-    /// Convert to a Mat4
-    #[inline]
-    pub fn to_mat4(&self) -> Mat4 {
-        match self {
-            Transform::Mat3(m) => Mat4::new(
-                m.get(0, 0), m.get(0, 1), 0.0, m.get(0, 2),
-                m.get(1, 0), m.get(1, 1), 0.0, m.get(1, 2),
-                0.0, 0.0, 1.0, 0.0,
-                m.get(2, 0), m.get(2, 1), 0.0, m.get(2, 2),
-            ),
-            Transform::Mat4(m) => *m,
-        }
-    }
-    
-    /// Transform a 2D point
-    #[inline]
-    pub fn transform_point_2d(&self, point: &Vec2) -> Vec2 {
-        match self {
-            Transform::Mat3(m) => m.transform_point(point),
-            Transform::Mat4(m) => {
-                let p = m.transform_point(&Vec3::new(point.x, point.y, 0.0));
-                Vec2::new(p.x, p.y)
-            }
-        }
-    }
-    
-    /// Transform a 3D point
-    #[inline]
-    pub fn transform_point_3d(&self, point: &Vec3) -> Vec3 {
-        match self {
-            Transform::Mat3(m) => {
-                let p = m.transform_point(&Vec2::new(point.x, point.y));
-                Vec3::new(p.x, p.y, point.z)
-            },
-            Transform::Mat4(m) => m.transform_point(point),
-        }
-    }
-    
-    /// Transform a 2D vector (direction)
-    #[inline]
-    pub fn transform_vector_2d(&self, vector: &Vec2) -> Vec2 {
-        match self {
-            Transform::Mat3(m) => m.transform_vector(vector),
-            Transform::Mat4(m) => {
-                let v = m.transform_vector(&Vec3::new(vector.x, vector.y, 0.0));
-                Vec2::new(v.x, v.y)
-            }
-        }
-    }
-    
-    /// Transform a 3D vector (direction)
-    #[inline]
-    pub fn transform_vector_3d(&self, vector: &Vec3) -> Vec3 {
-        match self {
-            Transform::Mat3(m) => {
-                let v = m.transform_vector(&Vec2::new(vector.x, vector.y));
-                Vec3::new(v.x, v.y, vector.z)
-            },
-            Transform::Mat4(m) => m.transform_vector(vector),
-        }
-    }
-    
-    /// Transform a 2D rectangle
-    #[inline]
-    pub fn transform_rect(&self, rect: &Rect) -> Rect {
-        let corners = rect.corners();
-        let transformed_corners: [Vec2; 4] = [
-            self.transform_point_2d(&corners[0]),
-            self.transform_point_2d(&corners[1]),
-            self.transform_point_2d(&corners[2]),
-            self.transform_point_2d(&corners[3]),
-        ];
+    pub fn scaling(x: f32, y: f32) -> Self {
+        let mut matrix = Mat3::identity();
+        matrix.set(0, 0, x);
+        matrix.set(1, 1, y);
         
-        let mut min_x = transformed_corners[0].x;
-        let mut min_y = transformed_corners[0].y;
-        let mut max_x = transformed_corners[0].x;
-        let mut max_y = transformed_corners[0].y;
-        
-        for i in 1..4 {
-            min_x = min_x.min(transformed_corners[i].x);
-            min_y = min_y.min(transformed_corners[i].y);
-            max_x = max_x.max(transformed_corners[i].x);
-            max_y = max_y.max(transformed_corners[i].y);
-        }
-        
-        Rect::new(min_x, min_y, max_x - min_x, max_y - min_y)
+        Self { matrix }
     }
     
-    /// Transform a 3D bounding box
-    #[inline]
-    pub fn transform_bounding_box(&self, bbox: &BoundingBox) -> BoundingBox {
-        let corners = bbox.corners();
-        let mut min = self.transform_point_3d(&corners[0]);
-        let mut max = min;
+    /// Create a skew transform
+    pub fn skew(x: f32, y: f32) -> Self {
+        let mut matrix = Mat3::identity();
+        matrix.set(0, 1, x.tan());
+        matrix.set(1, 0, y.tan());
         
-        for i in 1..8 {
-            let transformed = self.transform_point_3d(&corners[i]);
-            
-            min.x = min.x.min(transformed.x);
-            min.y = min.y.min(transformed.y);
-            min.z = min.z.min(transformed.z);
-            
-            max.x = max.x.max(transformed.x);
-            max.y = max.y.max(transformed.y);
-            max.z = max.z.max(transformed.z);
-        }
-        
-        BoundingBox::new(min, max)
+        Self { matrix }
     }
     
-    /// Get the inverse of this transform
-    #[inline]
-    pub fn inverse(&self) -> Option<Transform> {
-        match self {
-            Transform::Mat3(m) => {
-                m.inverse().map(Transform::Mat3)
-            },
-            Transform::Mat4(m) => {
-                m.inverse().map(Transform::Mat4)
-            },
-        }
+    /// Apply this transform to a 2D point
+    pub fn transform_point(&self, point: Point2D) -> Point2D {
+        let x = point.x * self.matrix.get(0, 0) + point.y * self.matrix.get(0, 1) + self.matrix.get(0, 2);
+        let y = point.x * self.matrix.get(1, 0) + point.y * self.matrix.get(1, 1) + self.matrix.get(1, 2);
+        
+        Point2D::new(x, y)
     }
     
     /// Combine this transform with another (this * other)
-    #[inline]
-    pub fn combine(&self, other: &Transform) -> Transform {
-        match (self, other) {
-            (Transform::Mat3(a), Transform::Mat3(b)) => Transform::Mat3(*a * *b),
-            (Transform::Mat4(a), Transform::Mat4(b)) => Transform::Mat4(*a * *b),
-            (Transform::Mat3(a), Transform::Mat4(b)) => Transform::Mat4(self.to_mat4() * *b),
-            (Transform::Mat4(a), Transform::Mat3(b)) => Transform::Mat4(*a * other.to_mat4()),
+    pub fn then(&self, other: &Transform2D) -> Self {
+        Self {
+            matrix: self.matrix * other.matrix
         }
     }
+}
+
+impl Transform3D {
+    /// Create a new 3D transform from a 4x4 matrix
+    pub fn new(matrix: Mat4) -> Self {
+        Self { matrix }
+    }
     
-    /// Returns true if this is a 2D transform
-    #[inline]
+    /// Create an identity transform
+    pub fn identity() -> Self {
+        Self { matrix: Mat4::identity() }
+    }
+    
+    /// Create a translation transform
+    pub fn translation(x: f32, y: f32, z: f32) -> Self {
+        let mut matrix = Mat4::identity();
+        matrix.set(0, 3, x);
+        matrix.set(1, 3, y);
+        matrix.set(2, 3, z);
+        
+        Self { matrix }
+    }
+    
+    /// Create a rotation around the X axis
+    pub fn rotation_x(radians: f32) -> Self {
+        let cos = radians.cos();
+        let sin = radians.sin();
+        
+        let mut matrix = Mat4::identity();
+        matrix.set(1, 1, cos);
+        matrix.set(1, 2, -sin);
+        matrix.set(2, 1, sin);
+        matrix.set(2, 2, cos);
+        
+        Self { matrix }
+    }
+    
+    /// Create a rotation around the Y axis
+    pub fn rotation_y(radians: f32) -> Self {
+        let cos = radians.cos();
+        let sin = radians.sin();
+        
+        let mut matrix = Mat4::identity();
+        matrix.set(0, 0, cos);
+        matrix.set(0, 2, sin);
+        matrix.set(2, 0, -sin);
+        matrix.set(2, 2, cos);
+        
+        Self { matrix }
+    }
+    
+    /// Create a rotation around the Z axis
+    pub fn rotation_z(radians: f32) -> Self {
+        let cos = radians.cos();
+        let sin = radians.sin();
+        
+        let mut matrix = Mat4::identity();
+        matrix.set(0, 0, cos);
+        matrix.set(0, 1, -sin);
+        matrix.set(1, 0, sin);
+        matrix.set(1, 1, cos);
+        
+        Self { matrix }
+    }
+    
+    /// Create a scaling transform
+    pub fn scaling(x: f32, y: f32, z: f32) -> Self {
+        let mut matrix = Mat4::identity();
+        matrix.set(0, 0, x);
+        matrix.set(1, 1, y);
+        matrix.set(2, 2, z);
+        
+        Self { matrix }
+    }
+    
+    /// Create a look-at view transform
+    pub fn look_at(eye: Point3D, target: Point3D, up: Vec3) -> Self {
+        // Calculate forward (z), right (x), and up (y) vectors
+        let forward = [
+            eye.x - target.x,
+            eye.y - target.y,
+            eye.z - target.z,
+        ];
+        
+        // Normalize forward
+        let len = (forward[0] * forward[0] + forward[1] * forward[1] + forward[2] * forward[2]).sqrt();
+        let forward = [forward[0] / len, forward[1] / len, forward[2] / len];
+        
+        // Calculate right vector with cross product
+        let right = [
+            up[1] * forward[2] - up[2] * forward[1],
+            up[2] * forward[0] - up[0] * forward[2],
+            up[0] * forward[1] - up[1] * forward[0],
+        ];
+        
+        // Normalize right
+        let len = (right[0] * right[0] + right[1] * right[1] + right[2] * right[2]).sqrt();
+        let right = [right[0] / len, right[1] / len, right[2] / len];
+        
+        // Recalculate up vector
+        let up = [
+            forward[1] * right[2] - forward[2] * right[1],
+            forward[2] * right[0] - forward[0] * right[2],
+            forward[0] * right[1] - forward[1] * right[0],
+        ];
+        
+        // Create view matrix
+        let mut matrix = Mat4::identity();
+        matrix.set(0, 0, right[0]);
+        matrix.set(1, 0, right[1]);
+        matrix.set(2, 0, right[2]);
+        
+        matrix.set(0, 1, up[0]);
+        matrix.set(1, 1, up[1]);
+        matrix.set(2, 1, up[2]);
+        
+        matrix.set(0, 2, forward[0]);
+        matrix.set(1, 2, forward[1]);
+        matrix.set(2, 2, forward[2]);
+        
+        matrix.set(0, 3, -right[0] * eye.x - right[1] * eye.y - right[2] * eye.z);
+        matrix.set(1, 3, -up[0] * eye.x - up[1] * eye.y - up[2] * eye.z);
+        matrix.set(2, 3, -forward[0] * eye.x - forward[1] * eye.y - forward[2] * eye.z);
+        
+        Self { matrix }
+    }
+    
+    /// Create a perspective projection transform
+    pub fn perspective(fov_y: f32, aspect: f32, near: f32, far: f32) -> Self {
+        let f = 1.0 / (fov_y / 2.0).tan();
+        let range_inv = 1.0 / (near - far);
+        
+        let mut matrix = Mat4::new([0.0; 16]);
+        matrix.set(0, 0, f / aspect);
+        matrix.set(1, 1, f);
+        matrix.set(2, 2, (near + far) * range_inv);
+        matrix.set(2, 3, 2.0 * near * far * range_inv);
+        matrix.set(3, 2, -1.0);
+        
+        Self { matrix }
+    }
+    
+    /// Create an orthographic projection transform
+    pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> Self {
+        let mut matrix = Mat4::identity();
+        matrix.set(0, 0, 2.0 / (right - left));
+        matrix.set(1, 1, 2.0 / (top - bottom));
+        matrix.set(2, 2, -2.0 / (far - near));
+        
+        matrix.set(0, 3, -(right + left) / (right - left));
+        matrix.set(1, 3, -(top + bottom) / (top - bottom));
+        matrix.set(2, 3, -(far + near) / (far - near));
+        
+        Self { matrix }
+    }
+    
+    /// Apply this transform to a 3D point
+    pub fn transform_point(&self, point: Point3D) -> Point3D {
+        let x = point.x * self.matrix.get(0, 0) + 
+               point.y * self.matrix.get(0, 1) + 
+               point.z * self.matrix.get(0, 2) + 
+               self.matrix.get(0, 3);
+               
+        let y = point.x * self.matrix.get(1, 0) + 
+               point.y * self.matrix.get(1, 1) + 
+               point.z * self.matrix.get(1, 2) + 
+               self.matrix.get(1, 3);
+               
+        let z = point.x * self.matrix.get(2, 0) + 
+               point.y * self.matrix.get(2, 1) + 
+               point.z * self.matrix.get(2, 2) + 
+               self.matrix.get(2, 3);
+               
+        let w = point.x * self.matrix.get(3, 0) + 
+               point.y * self.matrix.get(3, 1) + 
+               point.z * self.matrix.get(3, 2) + 
+               self.matrix.get(3, 3);
+               
+        let w_inv = if w != 0.0 { 1.0 / w } else { 1.0 };
+        
+        Point3D::new(x * w_inv, y * w_inv, z * w_inv)
+    }
+    
+    /// Combine this transform with another (this * other)
+    pub fn then(&self, other: &Transform3D) -> Self {
+        Self {
+            matrix: self.matrix * other.matrix
+        }
+    }
+}
+
+impl Transform {
+    /// Create an identity transform (2D by default)
+    pub fn identity() -> Self {
+        Self::Transform2D(Transform2D::identity())
+    }
+    
+    /// Create a 2D transform from a Transform2D
+    pub fn from_2d(transform: Transform2D) -> Self {
+        Self::Transform2D(transform)
+    }
+    
+    /// Create a 3D transform from a Transform3D
+    pub fn from_3d(transform: Transform3D) -> Self {
+        Self::Transform3D(transform)
+    }
+    
+    /// Check if this is a 2D transform
     pub fn is_2d(&self) -> bool {
-        matches!(self, Transform::Mat3(_))
+        matches!(self, Self::Transform2D(_))
     }
     
-    /// Returns true if this is a 3D transform
-    #[inline]
+    /// Check if this is a 3D transform
     pub fn is_3d(&self) -> bool {
-        matches!(self, Transform::Mat4(_))
+        matches!(self, Self::Transform3D(_))
     }
     
-    /// Extract the translation component from this transform
-    #[inline]
-    pub fn get_translation(&self) -> Vec3 {
+    /// Convert to a 2D transform
+    pub fn to_2d(&self) -> Option<Transform2D> {
         match self {
-            Transform::Mat3(m) => {
-                let translation_2d = m.get_translation();
-                Vec3::new(translation_2d.x, translation_2d.y, 0.0)
-            },
-            Transform::Mat4(m) => m.get_translation(),
+            Self::Transform2D(transform) => Some(*transform),
+            Self::Transform3D(_) => None,
         }
     }
     
-    /// Extract the 2D translation component from this transform
-    #[inline]
-    pub fn get_translation_2d(&self) -> Vec2 {
+    /// Convert to a 3D transform
+    pub fn to_3d(&self) -> Option<Transform3D> {
         match self {
-            Transform::Mat3(m) => m.get_translation(),
-            Transform::Mat4(m) => {
-                let translation = m.get_translation();
-                Vec2::new(translation.x, translation.y)
-            },
+            Self::Transform2D(_) => None,
+            Self::Transform3D(transform) => Some(*transform),
         }
-    }
-    
-    /// Extract the rotation as a quaternion (3D only)
-    #[inline]
-    pub fn get_rotation(&self) -> Option<Quaternion> {
-        match self {
-            Transform::Mat3(_) => None, // Cannot extract quaternion from 2D transform
-            Transform::Mat4(m) => Some(m.to_quaternion()),
-        }
-    }
-    
-    /// Extract the 2D rotation angle in radians
-    #[inline]
-    pub fn get_rotation_angle_2d(&self) -> f32 {
-        match self {
-            Transform::Mat3(m) => m.get_rotation(),
-            Transform::Mat4(m) => {
-                // Extract 2D rotation from 3D matrix
-                let x_axis = Vec2::new(m.get(0, 0), m.get(1, 0)).normalized();
-                f32::atan2(x_axis.y, x_axis.x)
-            },
-        }
-    }
-    
-    /// Extract the scale component
-    #[inline]
-    pub fn get_scale(&self) -> Vec3 {
-        match self {
-            Transform::Mat3(m) => {
-                let scale_2d = m.get_scale();
-                Vec3::new(scale_2d.x, scale_2d.y, 1.0)
-            },
-            Transform::Mat4(m) => m.get_scale(),
-        }
-    }
-    
-    /// Extract the 2D scale component
-    #[inline]
-    pub fn get_scale_2d(&self) -> Vec2 {
-        match self {
-            Transform::Mat3(m) => m.get_scale(),
-            Transform::Mat4(m) => {
-                let scale = m.get_scale();
-                Vec2::new(scale.x, scale.y)
-            },
-        }
-    }
-    
-    /// Decompose the transform into translation, rotation, and scale
-    #[inline]
-    pub fn decompose(&self) -> (Vec3, Option<Quaternion>, Vec3) {
-        let translation = self.get_translation();
-        let rotation = self.get_rotation();
-        let scale = self.get_scale();
-        
-        (translation, rotation, scale)
-    }
-}
-
-impl Default for Transform {
-    #[inline]
-    fn default() -> Self {
-        Transform::identity()
-    }
-}
-
-/// A transform stack for hierarchical transformations
-#[derive(Clone, Debug, Default)]
-pub struct TransformStack {
-    /// The stack of transforms
-    stack: Vec<Transform>,
-}
-
-impl TransformStack {
-    /// Create a new transform stack with an identity transform
-    #[inline]
-    pub fn new() -> Self {
-        Self {
-            stack: vec![Transform::identity()],
-        }
-    }
-    
-    /// Create a new 2D transform stack with an identity transform
-    #[inline]
-    pub fn new_2d() -> Self {
-        Self {
-            stack: vec![Transform::identity_2d()],
-        }
-    }
-    
-    /// Create a new 3D transform stack with an identity transform
-    #[inline]
-    pub fn new_3d() -> Self {
-        Self {
-            stack: vec![Transform::identity_3d()],
-        }
-    }
-    
-    /// Reset the stack to a single identity transform
-    #[inline]
-    pub fn reset(&mut self) {
-        self.stack.clear();
-        self.stack.push(Transform::identity());
-    }
-    
-    /// Reset the stack to a single 2D identity transform
-    #[inline]
-    pub fn reset_2d(&mut self) {
-        self.stack.clear();
-        self.stack.push(Transform::identity_2d());
-    }
-    
-    /// Reset the stack to a single 3D identity transform
-    #[inline]
-    pub fn reset_3d(&mut self) {
-        self.stack.clear();
-        self.stack.push(Transform::identity_3d());
-    }
-    
-    /// Push a transform onto the stack, combining it with the current transform
-    #[inline]
-    pub fn push(&mut self, transform: Transform) {
-        let current = self.current();
-        let combined = current.combine(&transform);
-        self.stack.push(combined);
-    }
-    
-    /// Pop a transform from the stack
-    #[inline]
-    pub fn pop(&mut self) -> Option<Transform> {
-        if self.stack.len() <= 1 {
-            return None;
-        }
-        
-        self.stack.pop()
-    }
-    
-    /// Get the current transform (top of the stack)
-    #[inline]
-    pub fn current(&self) -> Transform {
-        self.stack.last().cloned().unwrap_or_else(Transform::identity)
-    }
-    
-    /// Get the current inverse transform
-    #[inline]
-    pub fn current_inverse(&self) -> Option<Transform> {
-        self.current().inverse()
-    }
-    
-    /// Apply a translation
-    #[inline]
-    pub fn translate(&mut self, x: f32, y: f32, z: f32) {
-        self.push(Transform::translation(x, y, z));
-    }
-    
-    /// Apply a 2D translation
-    #[inline]
-    pub fn translate_2d(&mut self, x: f32, y: f32) {
-        self.push(Transform::translation_2d(x, y));
-    }
-    
-    /// Apply a 3D translation
-    #[inline]
-    pub fn translate_3d(&mut self, x: f32, y: f32, z: f32) {
-        self.push(Transform::translation_3d(x, y, z));
-    }
-    
-    /// Apply a scaling
-    #[inline]
-    pub fn scale(&mut self, x: f32, y: f32, z: f32) {
-        self.push(Transform::scaling(x, y, z));
-    }
-    
-    /// Apply a 2D scaling
-    #[inline]
-    pub fn scale_2d(&mut self, x: f32, y: f32) {
-        self.push(Transform::scaling_2d(x, y));
-    }
-    
-    /// Apply a 3D scaling
-    #[inline]
-    pub fn scale_3d(&mut self, x: f32, y: f32, z: f32) {
-        self.push(Transform::scaling_3d(x, y, z));
-    }
-    
-    /// Apply a uniform scaling
-    #[inline]
-    pub fn scale_uniform(&mut self, scale: f32) {
-        self.push(Transform::uniform_scaling(scale));
-    }
-    
-    /// Apply a 2D rotation (around Z axis)
-    #[inline]
-    pub fn rotate_2d(&mut self, angle_degrees: f32) {
-        self.push(Transform::rotation_2d(angle_degrees));
-    }
-    
-    /// Apply a rotation around the X axis
-    #[inline]
-    pub fn rotate_x(&mut self, angle_degrees: f32) {
-        self.push(Transform::rotation_x(angle_degrees));
-    }
-    
-    /// Apply a rotation around the Y axis
-    #[inline]
-    pub fn rotate_y(&mut self, angle_degrees: f32) {
-        self.push(Transform::rotation_y(angle_degrees));
-    }
-    
-    /// Apply a rotation around the Z axis
-    #[inline]
-    pub fn rotate_z(&mut self, angle_degrees: f32) {
-        self.push(Transform::rotation_z(angle_degrees));
-    }
-    
-    /// Apply a rotation from Euler angles
-    #[inline]
-    pub fn rotate_euler(&mut self, yaw: f32, pitch: f32, roll: f32) {
-        self.push(Transform::from_euler(yaw, pitch, roll));
-    }
-    
-    /// Apply a rotation from a quaternion
-    #[inline]
-    pub fn rotate_quaternion(&mut self, quaternion: &Quaternion) {
-        self.push(Transform::from_quaternion(quaternion));
-    }
-    
-    /// Transform a 2D point using the current transform
-    #[inline]
-    pub fn transform_point_2d(&self, point: &Vec2) -> Vec2 {
-        self.current().transform_point_2d(point)
-    }
-    
-    /// Transform a 3D point using the current transform
-    #[inline]
-    pub fn transform_point_3d(&self, point: &Vec3) -> Vec3 {
-        self.current().transform_point_3d(point)
-    }
-    
-    /// Transform a 2D vector using the current transform
-    #[inline]
-    pub fn transform_vector_2d(&self, vector: &Vec2) -> Vec2 {
-        self.current().transform_vector_2d(vector)
-    }
-    
-    /// Transform a 3D vector using the current transform
-    #[inline]
-    pub fn transform_vector_3d(&self, vector: &Vec3) -> Vec3 {
-        self.current().transform_vector_3d(vector)
-    }
-    
-    /// Transform a rectangle using the current transform
-    #[inline]
-    pub fn transform_rect(&self, rect: &Rect) -> Rect {
-        self.current().transform_rect(rect)
-    }
-    
-    /// Transform a bounding box using the current transform
-    #[inline]
-    pub fn transform_bounding_box(&self, bbox: &BoundingBox) -> BoundingBox {
-        self.current().transform_bounding_box(bbox)
     }
 } 

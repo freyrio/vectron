@@ -1,6 +1,6 @@
 use std::time::Duration;
 use std::thread::sleep;
-use vectron_embedder::{Embedder, EmbedderConfig, Event, WindowConfig, WindowEmbedder};
+use vectron_embedder::{Embedder, EmbedderConfig, Event, WindowConfig, WindowEmbedder, WindowId};
 
 fn main() {
     println!("Starting Vectron Multiple Windows Example");
@@ -18,50 +18,45 @@ fn main() {
     println!("Embedder initialized");
     
     // Create the main window
-    let main_window = embedder.create_window(WindowConfig {
-        title: "Main Window".to_string(),
-        width: 800,
-        height: 600,
-        resizable: true,
-        decorated: true,
-        visible: true,
-        position: Some((100, 100)),
-        min_size: None,
-        max_size: None,
-        parent: None,
-    }).expect("Failed to create main window");
+    let main_config = WindowConfig::new()
+        .with_title("Main Window")
+        .with_size(800, 600)
+        .with_resizable(true)
+        .with_decorated(true)
+        .with_visible(true)
+        .with_position(100, 100);
+        
+    let main_window = embedder.create_window(&main_config)
+        .expect("Failed to create main window");
     
     println!("Main window created with handle: {:?}", main_window);
     
     // Create a child window
-    let child_window = embedder.create_window(WindowConfig {
-        title: "Child Window".to_string(),
-        width: 400,
-        height: 300,
-        resizable: true,
-        decorated: true,
-        visible: false, // We'll show it later
-        position: Some((50, 50)),
-        min_size: None,
-        max_size: None,
-        parent: Some(main_window),
-    }).expect("Failed to create child window");
+    let child_config = WindowConfig::new()
+        .with_title("Child Window")
+        .with_size(400, 300)
+        .with_resizable(true)
+        .with_decorated(true)
+        .with_visible(false) // We'll show it later
+        .with_position(50, 50)
+        .with_parent(main_window);
+        
+    let child_window = embedder.create_window(&child_config)
+        .expect("Failed to create child window");
     
     println!("Child window created with handle: {:?}", child_window);
     
     // Create a popup window (no parent)
-    let popup_window = embedder.create_window(WindowConfig {
-        title: "Popup Window".to_string(),
-        width: 300,
-        height: 200,
-        resizable: false,
-        decorated: false, // Borderless popup
-        visible: false, // We'll show it later
-        position: Some((200, 200)),
-        min_size: None,
-        max_size: None,
-        parent: None,
-    }).expect("Failed to create popup window");
+    let popup_config = WindowConfig::new()
+        .with_title("Popup Window")
+        .with_size(300, 200)
+        .with_resizable(false)
+        .with_decorated(false) // Borderless popup
+        .with_visible(false) // We'll show it later
+        .with_position(200, 200);
+        
+    let popup_window = embedder.create_window(&popup_config)
+        .expect("Failed to create popup window");
     
     println!("Popup window created with handle: {:?}", popup_window);
     
@@ -97,7 +92,7 @@ fn main() {
             0 => {
                 if frame_count == 60 {
                     println!("Showing child window");
-                    embedder.show_window(child_window);
+                    embedder.show_window(&child_window);
                     demonstration_phase = 1;
                 }
             },
@@ -106,7 +101,7 @@ fn main() {
             1 => {
                 if frame_count == 120 {
                     println!("Changing child window title");
-                    embedder.set_window_title(child_window, "Updated Child Window Title");
+                    embedder.set_window_title(&child_window, "Updated Child Window Title");
                     demonstration_phase = 2;
                 }
             },
@@ -115,7 +110,7 @@ fn main() {
             2 => {
                 if frame_count == 180 {
                     println!("Resizing child window");
-                    embedder.set_window_size(child_window, 500, 350);
+                    embedder.set_window_size(&child_window, 500, 350);
                     demonstration_phase = 3;
                 }
             },
@@ -124,7 +119,7 @@ fn main() {
             3 => {
                 if frame_count == 240 {
                     println!("Moving child window");
-                    embedder.set_window_position(child_window, 100, 100);
+                    embedder.set_window_position(&child_window, 100, 100);
                     demonstration_phase = 4;
                 }
             },
@@ -133,7 +128,7 @@ fn main() {
             4 => {
                 if frame_count == 300 {
                     println!("Showing popup window");
-                    embedder.show_window(popup_window);
+                    embedder.show_window(&popup_window);
                     demonstration_phase = 5;
                 }
             },
@@ -142,7 +137,7 @@ fn main() {
             5 => {
                 if frame_count == 360 {
                     println!("Moving popup window");
-                    embedder.set_window_position(popup_window, 400, 300);
+                    embedder.set_window_position(&popup_window, 400, 300);
                     demonstration_phase = 6;
                 }
             },
@@ -151,7 +146,7 @@ fn main() {
             6 => {
                 if frame_count == 420 {
                     println!("Hiding popup window");
-                    embedder.hide_window(popup_window);
+                    embedder.hide_window(&popup_window);
                     demonstration_phase = 7;
                 }
             },
@@ -159,10 +154,10 @@ fn main() {
             // Phase 7: Demonstrate getting window properties
             7 => {
                 if frame_count == 480 {
-                    let main_size = embedder.get_window_size(main_window);
-                    let main_pos = embedder.get_window_position(main_window);
-                    let child_size = embedder.get_window_size(child_window);
-                    let child_pos = embedder.get_window_position(child_window);
+                    let main_size = embedder.get_window_size(&main_window);
+                    let main_pos = embedder.get_window_position(&main_window);
+                    let child_size = embedder.get_window_size(&child_window);
+                    let child_pos = embedder.get_window_position(&child_window);
                     
                     println!("Main window size: {}x{}, position: ({}, {})", 
                              main_size.0, main_size.1, main_pos.0, main_pos.1);
@@ -184,7 +179,7 @@ fn main() {
             _ => {}
         }
         
-        // Request window redraws
+        // Request window redraws - these use Embedder trait which takes value
         if frame_count % 60 == 0 {
             println!("Frame count: {}", frame_count);
             embedder.request_redraw(main_window);
@@ -203,9 +198,9 @@ fn main() {
     
     // Clean up
     println!("Cleaning up windows");
-    embedder.destroy_window(popup_window);
-    embedder.destroy_window(child_window);
-    embedder.destroy_window(main_window);
+    embedder.destroy_window(&popup_window);
+    embedder.destroy_window(&child_window);
+    embedder.destroy_window(&main_window);
     embedder.shutdown();
     
     println!("Example completed successfully");

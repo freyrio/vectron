@@ -1,8 +1,8 @@
 [workspace]
-members = [
+members = [ "test_directx", "vectron_app",
     "vectron_embedder",
-    "vectron_gpu", 
-    "vectron_render",
+    "vectron_gpu", "vectron_gui", 
+    "vectron_render", "vectron_wgpu",
 ]
 resolver = "2"
 

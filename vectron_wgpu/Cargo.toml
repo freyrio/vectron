@@ -1,0 +1,21 @@
+[package]
+name = "vectron_wgpu"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "WGPU rendering backend for Vectron"
+license.workspace = true
+rust-version = "1.84"
+
+[dependencies]
+raw-window-handle = { version = "~0.6.0", features = ["alloc"] }
+windows-sys = "0.52"
+futures-lite = "2.0"
+pollster = "0.3"
+wgpu = { version = "25.0.0", default-features = false, features = ["vulkan"] }
+
+[features]
+default = []
+dx12 = ["wgpu/dx12"]
+metal = ["wgpu/metal"]
+vulkan = ["wgpu/vulkan"] 

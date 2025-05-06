@@ -29,7 +29,7 @@ windows = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_Graphics_Dwm"
 ]}
-raw-window-handle = "0.5"
+raw-window-handle = { version = "~0.6.0", features = ["alloc"] }
 
 # Example common dependencies (uncomment as needed)
 # log = "0.4"

@@ -4,7 +4,7 @@ mod view;
 mod platform;
 
 pub use embedder::{Embedder, EmbedderConfig, EmbedderError, Event, Surface};
-pub use window::{WindowConfig, WindowEmbedder, WindowHandle, WindowError};
+pub use window::{WindowConfig, WindowEmbedder, WindowId, WindowError, Window};
 pub use view::{ViewConfig, ViewEmbedder, ViewHandle, ViewError};
 pub use platform::*;
 
