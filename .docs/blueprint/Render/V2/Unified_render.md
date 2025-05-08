@@ -107,8 +107,6 @@ render_core/
 │   │   ├── path.rs # Path rasterization algorithms
 │   │   ├── text.rs # Text rasterization utilities
 │   │   └── blend.rs # Blending operations for rasterization
-│   │
-│   └── operation.rs # Operation definition (element + style + transform)
 │
 ├── backend/        # Abstract backend interface
 │   ├── mod.rs      # Backend module exports

@@ -57,6 +57,11 @@ pub enum Key {
     Tab,
     Backspace,
     Delete,
+    // Arrow keys
+    Left,
+    Right,
+    Up,
+    Down,
     // ... more keys
 }
 

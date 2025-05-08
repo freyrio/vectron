@@ -245,7 +245,7 @@ impl WindowEmbedder for Win32Embedder {
     fn get_window(&self, handle: &WindowId) -> Option<Window> {
         self.windows.get(handle).map(|win_data| {
             Window::new(
-                self as *const _ as *mut std::ffi::c_void,
+                self.instance.0 as *mut std::ffi::c_void,
                 *handle,
                 win_data.hwnd.0 as *mut std::ffi::c_void,
                 win_data.width,

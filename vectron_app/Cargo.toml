@@ -9,9 +9,14 @@ license.workspace = true
 [dependencies]
 vectron_embedder = { path = "../vectron_embedder" }
 vectron_wgpu = { path = "../vectron_wgpu" }
-wgpu = { version = "25.0.0", default-features = false, features = ["vulkan"] }
+vectron_render = { path = "../vectron_render" }
 raw-window-handle = "~0.6.0"
+bytemuck = { version = "1.14.0", features = ["derive"] }
 
 [[example]]
 name = "basic_window"
 path = "examples/basic_window.rs"
+
+[[example]]
+name = "wgpu_integration"
+path = "examples/wgpu_integration.rs"

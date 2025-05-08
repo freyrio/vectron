@@ -1,43 +1,60 @@
-use std::error::Error;
-use std::fmt;
+use thiserror::Error;
 
-/// Represents errors that can occur during rendering operations
-#[derive(Debug)]
+/// Core error types for the rendering engine
+#[derive(Error, Debug)]
 pub enum RenderError {
-    /// Generic operation error with a message
-    OperationError(String),
+    #[error("Device creation failed: {0}")]
+    DeviceCreation(String),
     
-    /// Error related to backend device or resource management
-    BackendError(String),
+    #[error("Resource creation failed: {0}")]
+    ResourceCreation(String),
     
-    /// Error occurring during tessellation
+    #[error("Invalid operation: {0}")]
+    InvalidOperation(String),
+    
+    #[error("Unsupported feature: {0}")]
+    UnsupportedFeature(String),
+    
+    #[error("Out of memory: {0}")]
+    OutOfMemory(String),
+    
+    #[error("Surface error: {0}")]
+    SurfaceError(String),
+    
+    #[error("Tessellation error: {0}")]
     TessellationError(String),
     
-    /// Error during resource creation or management
-    ResourceError(String),
+    #[error("Resource not found: {0}")]
+    ResourceNotFound(String),
     
-    /// Error during text rendering operations
-    TextError(String),
+    #[error("Backend error: {0}")]
+    Backend(#[from] BackendError),
     
-    /// Invalid or incompatible state
-    InvalidState(String),
+    #[error("Other error: {0}")]
+    Other(String),
+}
+
+/// Backend-specific errors
+#[derive(Error, Debug)]
+pub enum BackendError {
+    #[error("Device creation failed: {0}")]
+    DeviceCreation(String),
     
-    /// Feature not supported by current backend/configuration
+    #[error("Resource creation failed: {0}")]
+    ResourceCreation(String),
+    
+    #[error("Invalid operation: {0}")]
+    InvalidOperation(String),
+    
+    #[error("Unsupported feature: {0}")]
     UnsupportedFeature(String),
-}
-
-impl fmt::Display for RenderError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RenderError::OperationError(msg) => write!(f, "Operation error: {}", msg),
-            RenderError::BackendError(msg) => write!(f, "Backend error: {}", msg),
-            RenderError::TessellationError(msg) => write!(f, "Tessellation error: {}", msg),
-            RenderError::ResourceError(msg) => write!(f, "Resource error: {}", msg),
-            RenderError::TextError(msg) => write!(f, "Text error: {}", msg),
-            RenderError::InvalidState(msg) => write!(f, "Invalid state: {}", msg),
-            RenderError::UnsupportedFeature(msg) => write!(f, "Unsupported feature: {}", msg),
-        }
-    }
-}
-
-impl Error for RenderError {} 
+    
+    #[error("Out of memory: {0}")]
+    OutOfMemory(String),
+    
+    #[error("Surface error: {0}")]
+    SurfaceError(String),
+    
+    #[error("Backend error: {0}")]
+    Other(String),
+} 

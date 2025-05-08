@@ -3,7 +3,7 @@ mod window;
 mod view;
 mod platform;
 
-pub use embedder::{Embedder, EmbedderConfig, EmbedderError, Event, Surface};
+pub use embedder::{Embedder, EmbedderConfig, EmbedderError, Event, Surface, InputEvent, Key, MouseButton};
 pub use window::{WindowConfig, WindowEmbedder, WindowId, WindowError, Window};
 pub use view::{ViewConfig, ViewEmbedder, ViewHandle, ViewError};
 pub use platform::*;

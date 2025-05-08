@@ -1,5 +1,5 @@
-/// Resource ID type aliases
-pub type ResourceId = u64;
+// Import Uuid type from vectron_render
+use vectron_render::core::types::common::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SurfaceId(pub u64);

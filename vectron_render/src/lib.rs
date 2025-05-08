@@ -1,17 +1,24 @@
-/*!
-# Vectron Render
-
-A flexible rendering system that builds on top of the Vectron GPU abstraction.
-It offers a tiered API approach for different levels of control and abstraction,
-supporting 2D vector graphics, text rendering, and 3D rendering through a consistent interface.
-*/
-
-// Version info
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-// Core modules
-pub mod error;
+// Module declarations
+pub mod backend;
 pub mod core;
 pub mod math;
-// Re-export key components
-pub use error::RenderError;
+pub mod effect;
+pub mod color;
+pub mod units;
+pub mod style;
+pub mod d2;
+pub mod d3;
+pub mod resource;
+pub mod renderer;
+// Re-exports
+pub use backend::*;
+pub use core::*;
+pub use math::*;
+pub use effect::*;
+pub use color::*;
+pub use units::*;
+pub use style::*;
+pub use d2::*;
+pub use d3::*;
+pub use resource::*;
+pub use renderer::*;

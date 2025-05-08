@@ -200,6 +200,11 @@ impl HasWindowHandle for Window {
                 .ok_or(HandleError::NotSupported)?
         );
         
+        // Set the HINSTANCE (needed for Vulkan)
+        if let Some(instance) = NonZeroIsize::new(self.embedder as isize) {
+            handle.hinstance = Some(instance);
+        }
+        
         unsafe {
             Ok(raw_window_handle::WindowHandle::borrow_raw(
                 RawWindowHandle::Win32(handle)
@@ -251,13 +256,12 @@ impl HasDisplayHandle for Window {
     }
 }
 
-// Linux X11
-#[cfg(all(target_os = "linux", feature = "x11"))]
+#[cfg(target_os = "linux")]
 impl HasWindowHandle for Window {
     fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, HandleError> {
         use raw_window_handle::XlibWindowHandle;
         
-        let mut handle = XlibWindowHandle::new(self.native_handle as _);
+        let mut handle = XlibWindowHandle::new(self.native_handle as u32);
         unsafe {
             Ok(raw_window_handle::WindowHandle::borrow_raw(
                 RawWindowHandle::Xlib(handle)
@@ -266,12 +270,12 @@ impl HasWindowHandle for Window {
     }
 }
 
-#[cfg(all(target_os = "linux", feature = "x11"))]
+#[cfg(target_os = "linux")]
 impl HasDisplayHandle for Window {
     fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, HandleError> {
         use raw_window_handle::XlibDisplayHandle;
         
-        let handle = XlibDisplayHandle::new();
+        let mut handle = XlibDisplayHandle::new(std::ptr::null_mut());
         unsafe {
             Ok(raw_window_handle::DisplayHandle::borrow_raw(
                 RawDisplayHandle::Xlib(handle)

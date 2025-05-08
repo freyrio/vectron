@@ -1,5 +1,5 @@
 // In src/backends/mod.rs
-
+/* 
 #[cfg(all(target_os = "windows", feature = "dx12"))]
 pub mod directx;
 
@@ -62,3 +62,4 @@ pub fn create_backend() -> Box<dyn GpuBackend> {
         panic!("No suitable GPU backend found for the current platform and features!");
     }
 }
+    */

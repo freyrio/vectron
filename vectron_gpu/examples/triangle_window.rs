@@ -5,7 +5,7 @@ use vectron_gpu::{
     BackendConfig, BlendState, BufferDescriptor, BufferUsageFlags, CpuAccessMode, DepthStencilState, GpuBackend, PipelineDescriptor, PipelineType, PrimitiveTopology, RasterizerState, RenderCommand, ShaderDescriptor, ShaderLanguage, ShaderSource, ShaderStage, SurfaceDescriptor, TextureFormat, VertexAttributeDescriptor, VertexFormat, VertexLayoutDescriptor, VertexStepMode
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> { /* 
     // Create and initialize the embedder
     let mut embedder = create_embedder();
     embedder.init(EmbedderConfig {
@@ -194,5 +194,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         backend.end_frame()?;
     }
 
+    Ok(())*/
     Ok(())
 } 

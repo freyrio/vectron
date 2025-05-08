@@ -10,6 +10,7 @@ bitflags = "2.4"
 log = "0.4"
 bytemuck = { version = "1.14", features = ["derive"] }
 uuid = { version = "1.6", features = ["v4"] }
+vectron_render = { path = "../vectron_render" }
 
 # Windows-specific dependencies for DirectX
 [target.'cfg(target_os = "windows")'.dependencies]

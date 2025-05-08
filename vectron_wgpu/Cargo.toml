@@ -12,10 +12,9 @@ raw-window-handle = { version = "~0.6.0", features = ["alloc"] }
 windows-sys = "0.52"
 futures-lite = "2.0"
 pollster = "0.3"
-wgpu = { version = "25.0.0", default-features = false, features = ["vulkan"] }
+wgpu = { version = "25.0.0", default-features = false, features = ["vulkan", "wgsl"] }
+vectron_render = { path = "../vectron_render" }
 
 [features]
 default = []
-dx12 = ["wgpu/dx12"]
-metal = ["wgpu/metal"]
 vulkan = ["wgpu/vulkan"] 
